@@ -1,17 +1,43 @@
-# React + Vite
+# GridLens
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite frontend for the FastAPI project similarity service.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+From the project root, start the backend in one PowerShell terminal:
 
-## React Compiler
+```powershell
+.\backend\.venv\Scripts\Activate.ps1
+$env:HF_HUB_OFFLINE = '1'
+python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+In a second terminal:
 
-## Expanding the ESLint configuration
+```powershell
+npm install
+npm run dev
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
-# ShellHacks_2026
+Open the localhost URL printed by Vite. Keep both terminals running. The Vite development server forwards `/api` requests to `http://127.0.0.1:8000`.
+
+The initial scores request may take longer because the backend loads its sentence-transformer model on first use. Offline mode uses the model already cached on this computer and avoids local certificate errors when contacting Hugging Face. On a fresh machine, download the configured model first with offline mode unset.
+
+## Features
+
+- Live overlap scores from `GET /overlaps/similarity`
+- Search by project name, utility, or overlap ID
+- Minimum score filter and ascending/descending sort
+- Pair comparison through `POST /similarity`
+- Loading, empty, and retryable error states
+
+Scores are cosine similarities in the range -1 to 1, not percentages or probabilities. The current backend implements semantic similarity; it does not expose a named entity recognition (NER) endpoint.
+
+## Validation and deployment
+
+```powershell
+npm run lint
+npm run build
+```
+
+For deployment, configure a same-origin `/api` reverse proxy to FastAPI, or set `VITE_API_BASE_URL` to your API URL before building. A separate API origin also requires appropriate CORS configuration on the backend. Vite's development proxy is not bundled into the production build.
