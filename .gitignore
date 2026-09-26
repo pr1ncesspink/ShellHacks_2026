@@ -1,3 +1,21 @@
+# Python
+.venv/
+.venv-documents/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+.codegraph/
+
+# Generated outputs
+backend/pdfparsing/outputs/
+backend/documentparsing/outputs/
+
+# Secrets and local env
+.env
+.env.local
+backend/deploy/cloudrun.env
+
 # Logs
 logs
 *.log
@@ -7,11 +25,8 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Frontend
 node_modules
-.venv/
-__pycache__/
-*.py[cod]
-.codegraph/
 dist
 dist-ssr
 .next/

@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
-ENV_FILE="${SCRIPT_DIR}/cloudrun.env"
+ENV_FILE="${CLOUDRUN_ENV_FILE:-${SCRIPT_DIR}/cloudrun.env}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -35,7 +35,7 @@ GCLOUD_CONFIG="${GCLOUD_CONFIG:-shellhacks}"
 if [[ -n "${CLOUDRUN_PUBLIC:-}" ]]; then
   DEPLOY_PUBLIC="${CLOUDRUN_PUBLIC}"
 elif [[ -z "${PUBLIC:-}" ]] || [[ "${PUBLIC}" =~ ^[A-Za-z]:[\\/]Users[\\/]Public[\\/]?$ ]] || [[ "${PUBLIC}" =~ ^/([a-zA-Z])/Users/Public/?$ ]]; then
-  DEPLOY_PUBLIC=1
+  DEPLOY_PUBLIC=0
 else
   DEPLOY_PUBLIC="${PUBLIC}"
 fi

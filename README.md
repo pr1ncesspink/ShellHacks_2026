@@ -85,11 +85,11 @@ Scores are cosine similarities in the range -1 to 1, not percentages or probabil
 
 ## Document ingestion (Snowflake)
 
-The document-ingestion implementation on GitHub's `main` branch uses Snowflake Cortex. See [setup, supported formats and JSON outputs](https://github.com/pr1ncesspink/ShellHacks_2026/blob/main/backend/documentparsing/README.md). If your checkout predates those additions, integrate the latest `main` before running this pipeline.
+Document ingestion uses Snowflake Cortex. See [setup, supported formats and JSON outputs](backend/documentparsing/README.md).
 
 The canonical pipeline is `python -m backend.documentparsing`. It sends documents through Snowflake `AI_PARSE_DOCUMENT` and `AI_EXTRACT`, validates project records, and exports structured JSON for the existing overlap and similarity workflow.
 
-The previous `python -m backend.pdfparsing` command and Python `run(args)` entry point forward to that pipeline; the local PDF extraction implementation has been removed on `main`. Use the dedicated `.venv-documents` environment described in the ingestion documentation.
+The previous `python -m backend.pdfparsing` command and Python `run(args)` entry point forward to that pipeline; the local PDF extraction implementation has been removed. Use the dedicated `.venv-documents` environment described in the ingestion documentation.
 
 The frontend file picker is not connected to this pipeline. Selecting a file does not send it to Snowflake or Cloud Run.
 
