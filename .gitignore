@@ -1,0 +1,11 @@
+.venv/
+.venv-documents/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+.codegraph/
+backend/pdfparsing/outputs/
+backend/documentparsing/outputs/
+.env
+.env.local
