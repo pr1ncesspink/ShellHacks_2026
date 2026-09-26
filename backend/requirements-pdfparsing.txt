@@ -1,0 +1,2 @@
+# Compatibility installation path; ingestion is owned by documentparsing.
+-r requirements-documentparsing.txt

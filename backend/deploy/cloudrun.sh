@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
-ENV_FILE="${SCRIPT_DIR}/cloudrun.env"
+ENV_FILE="${CLOUDRUN_ENV_FILE:-${SCRIPT_DIR}/cloudrun.env}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   # shellcheck disable=SC1090

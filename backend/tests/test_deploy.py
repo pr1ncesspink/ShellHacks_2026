@@ -11,7 +11,7 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "backend" / "deploy" / ".sh"
+SCRIPT = REPO_ROOT / "backend" / "deploy" / "cloudrun.sh"
 
 
 def _bash() -> str | None:
@@ -29,6 +29,9 @@ def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Com
     if bash is None:
         pytest.skip("a usable Bash interpreter is unavailable")
     command = 'exec /usr/bin/bash backend/deploy/cloudrun.sh "$@"'
+    # Keep a developer's local cloudrun.env from leaking into these checks.
+    env = dict(os.environ if env is None else env)
+    env["CLOUDRUN_ENV_FILE"] = "/nonexistent/cloudrun.env"
     return subprocess.run(
         [bash, "-c", command, "--", *args],
         cwd=REPO_ROOT,
