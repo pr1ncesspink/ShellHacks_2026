@@ -22,5 +22,7 @@ tmp/
 backend/output/
 backend/tests/
 backend/deploy/cloudrun.env
+backend/app/**/.env
+**/.env
 **/__pycache__/
 .pytest_cache/

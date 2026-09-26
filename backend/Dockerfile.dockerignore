@@ -11,3 +11,5 @@ tmp/
 backend/output/
 backend/tests/
 frontend/
+**/.env
+backend/app/**/.env

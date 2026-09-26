@@ -18,6 +18,9 @@ class Settings:
     data_path: Path
     output_path: Path
     batch_size: int = 32
+    agent_model: str = "gemini-flash-latest"
+    enable_a2a: bool = False
+    a2a_public_url: str = "http://localhost:8000/a2a"
 
 
 def get_settings() -> Settings:
@@ -27,4 +30,7 @@ def get_settings() -> Settings:
         device=getenv("SIMILARITY_DEVICE", "cpu"),
         data_path=Path(getenv("OVERLAPS_DATA_PATH", REPO_ROOT / "backend/data/projects_overlaps.csv")),
         output_path=Path(getenv("OVERLAPS_OUTPUT_PATH", REPO_ROOT / "backend/output/overlap_similarity.csv")),
+        agent_model=getenv("ADK_MODEL", "gemini-flash-latest"),
+        enable_a2a=getenv("ENABLE_A2A") == "1",
+        a2a_public_url=getenv("A2A_PUBLIC_URL", "http://localhost:8000/a2a"),
     )
