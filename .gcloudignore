@@ -1,0 +1,26 @@
+# Only the runtime build context is sent to Cloud Build.
+**
+!backend/
+!backend/Dockerfile
+!backend/Dockerfile.dockerignore
+!backend/cloudbuild.yaml
+!backend/requirements.txt
+!backend/__init__.py
+!backend/app/
+!backend/app/**
+!backend/data/
+!backend/data/**
+
+.venv/
+.git/
+.harness/
+.codex/
+.agents/
+.claude/
+.codegraph/
+tmp/
+backend/output/
+backend/tests/
+backend/deploy/cloudrun.env
+**/__pycache__/
+.pytest_cache/
