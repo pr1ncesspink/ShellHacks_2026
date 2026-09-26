@@ -27,3 +27,17 @@ class FakeEncoder:
 @pytest.fixture
 def fake_encoder() -> FakeEncoder:
     return FakeEncoder()
+
+
+@pytest.fixture(autouse=True)
+def reset_agent_tool_state(request):
+    """Keep the agent tool provider and row cache isolated between agent tests."""
+    if not request.node.path.name.startswith(("test_agent", "test_a2a", "test_gemini")):
+        yield
+        return
+
+    from backend.app.agents.overlap_agent import tools
+
+    tools.reset_encoder_provider()
+    yield
+    tools.reset_encoder_provider()
