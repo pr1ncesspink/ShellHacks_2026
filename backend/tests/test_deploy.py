@@ -11,7 +11,7 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "backend" / "deploy" / "cloudrun.sh"
+SCRIPT = REPO_ROOT / "backend" / "deploy" / ".sh"
 
 
 def _bash() -> str | None:
@@ -54,6 +54,7 @@ case \"$*\" in
   *"properties.auth.impersonate_service_account"*) printf '%s\\n' \"${FAKE_IMPERSONATION:-}\" ;;
   *"auth list"*) printf '%s\\n' \"${FAKE_ACCOUNT-deployer@example.com}\" ;;
   *"run services describe"*) printf '%s\\n' https://shellhacks.example ;;
+  *"auth print-identity-token"*) printf '%s\\n' test-identity-token ;;
 esac
 """,
         encoding="utf-8",
@@ -75,6 +76,7 @@ esac
             "SERVICE_NAME",
             "AR_REPO",
             "GCLOUD_CONFIG",
+            "CLOUDRUN_PUBLIC",
             "PUBLIC",
             "TAG",
         }:
@@ -107,12 +109,40 @@ def test_default_configuration_is_refused() -> None:
     assert "must not be default" in result.stderr
 
 
-def test_windows_public_folder_environment_uses_default_public_toggle() -> None:
+def test_windows_public_folder_environment_uses_private_default_toggle() -> None:
     env = os.environ.copy()
+    env.pop("CLOUDRUN_PUBLIC", None)
     env.update({"GCP_PROJECT_ID": "demo-project", "PUBLIC": r"C:\Users\Public"})
     result = _run_script("--dry-run", "deploy", env=env)
     assert result.returncode == 0, result.stderr
+    assert "--no-allow-unauthenticated" in result.stdout
+    assert "--allow-unauthenticated" not in result.stdout
+
+
+@pytest.mark.parametrize("updates", [{}, {"PUBLIC": ""}, {"CLOUDRUN_PUBLIC": ""}])
+def test_missing_or_empty_public_toggle_defaults_to_private(updates: dict[str, str]) -> None:
+    env = os.environ.copy()
+    env.update({"GCP_PROJECT_ID": "demo-project"})
+    env.pop("CLOUDRUN_PUBLIC", None)
+    env.pop("PUBLIC", None)
+    env.update(updates)
+    result = _run_script("--dry-run", "deploy", env=env)
+    assert result.returncode == 0, result.stderr
+    assert "--no-allow-unauthenticated" in result.stdout
+    assert "--allow-unauthenticated" not in result.stdout
+
+
+@pytest.mark.parametrize("updates", [{"CLOUDRUN_PUBLIC": "1"}, {"PUBLIC": "1"}])
+def test_explicit_public_toggle_allows_unauthenticated_access(updates: dict[str, str]) -> None:
+    env = os.environ.copy()
+    env.update({"GCP_PROJECT_ID": "demo-project"})
+    env.pop("CLOUDRUN_PUBLIC", None)
+    env.pop("PUBLIC", None)
+    env.update(updates)
+    result = _run_script("--dry-run", "deploy", env=env)
+    assert result.returncode == 0, result.stderr
     assert "--allow-unauthenticated" in result.stdout
+    assert "--no-allow-unauthenticated" not in result.stdout
 
 
 def test_invalid_explicit_public_toggle_is_refused() -> None:
@@ -164,6 +194,9 @@ def test_live_deploy_scopes_every_gcloud_invocation(tmp_path: Path) -> None:
     assert calls
     assert all("--configuration=shellhacks" in call and "--project=demo-project" in call for call in calls)
     assert Path(env["FAKE_CURL_LOG"]).exists()
+    assert "--no-allow-unauthenticated" in "\n".join(calls)
+    assert "Authorization: Bearer [redacted]" in result.stderr
+    assert "test-identity-token" not in result.stdout + result.stderr
 
 
 def test_deploy_static_contracts() -> None:

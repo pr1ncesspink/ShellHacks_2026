@@ -35,7 +35,7 @@ GCLOUD_CONFIG="${GCLOUD_CONFIG:-shellhacks}"
 if [[ -n "${CLOUDRUN_PUBLIC:-}" ]]; then
   DEPLOY_PUBLIC="${CLOUDRUN_PUBLIC}"
 elif [[ -z "${PUBLIC:-}" ]] || [[ "${PUBLIC}" =~ ^[A-Za-z]:[\\/]Users[\\/]Public[\\/]?$ ]] || [[ "${PUBLIC}" =~ ^/([a-zA-Z])/Users/Public/?$ ]]; then
-  DEPLOY_PUBLIC=1
+  DEPLOY_PUBLIC=0
 else
   DEPLOY_PUBLIC="${PUBLIC}"
 fi
