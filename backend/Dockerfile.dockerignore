@@ -1,0 +1,15 @@
+.venv/
+.git/
+.harness/
+.codex/
+.agents/
+.claude/
+.codegraph/
+tmp/
+**/__pycache__/
+.pytest_cache/
+backend/output/
+backend/tests/
+frontend/
+**/.env
+backend/app/**/.env
