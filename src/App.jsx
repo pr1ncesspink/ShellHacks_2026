@@ -26,6 +26,7 @@ export default function App() {
   const [textB, setTextB] = useState('')
   const [comparison, setComparison] = useState(null)
   const [comparing, setComparing] = useState(false)
+  const [showCat, setShowCat] = useState(false)
   const [compareError, setCompareError] = useState('')
 
   useEffect(() => {
@@ -51,6 +52,7 @@ export default function App() {
 
   async function compare(event) {
     event.preventDefault()
+    setShowCat(true)
     setComparing(true)
     setCompareError('')
     setComparison(null)
@@ -89,7 +91,12 @@ export default function App() {
             <div className="table-footer">{loading || error ? 'Waiting for model results' : `${visible.length} of ${rows.length} pairs`}<span>Cosine similarity · −1 to 1</span></div>
           </section>
           <aside><section className="panel compare"><span className="eyebrow">TRY IT YOURSELF</span><h2>Compare two names</h2><p>Run a new pair through the model.</p><form onSubmit={compare}><label htmlFor="text-a">Project A</label><textarea id="text-a" placeholder="Enter the first project name" maxLength={512} required disabled={comparing} value={textA} onChange={e => { setTextA(e.target.value); setComparison(null) }} /><label htmlFor="text-b">Project B</label><textarea id="text-b" placeholder="Enter the second project name" maxLength={512} required disabled={comparing} value={textB} onChange={e => { setTextB(e.target.value); setComparison(null) }} /><button className="primary" disabled={comparing || !textA.trim() || !textB.trim()}>{comparing ? 'Comparing…' : 'Compare names →'}</button></form><div aria-live="polite">{comparison !== null && <div className="comparison-result"><span>Similarity score</span><Score value={comparison} /></div>}{compareError && <p className="inline-error" role="alert">{compareError}</p>}</div></section>
-          <section className="explanation"><span className="info-icon">i</span><h3>Reading the scores</h3><p>Scores closer to 1 indicate more similar meanings. Scores near 0 indicate little similarity; negative scores indicate opposing directions in the embedding space.</p><p>These are semantic similarity scores, not probabilities or NER entity confidence scores.</p></section></aside>
+          <div className="score-info"><section className="explanation"><span className="info-icon">i</span><h3>Reading the scores</h3><p>Scores closer to 1 indicate more similar meanings. Scores near 0 indicate little similarity; negative scores indicate opposing directions in the embedding space.</p><p>These are semantic similarity scores, not probabilities or NER entity confidence scores.</p></section>
+          {showCat && <section className="panel cat-card" aria-label="Excited cat">
+            <button type="button" className="cat-dismiss" aria-label="Hide cat animation" onClick={() => setShowCat(false)}>×</button>
+            <img src="https://media1.tenor.com/m/RiZpodi6JD0AAAAC/fast-cat-cat-excited.gif" alt="An excited cat moving quickly" referrerPolicy="no-referrer" />
+          </section>}
+          </div></aside>
         </div>
         <footer className="page-footer"><span>GridLens</span><span>Powered by your FastAPI model service</span></footer>
       </main>

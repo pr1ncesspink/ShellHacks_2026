@@ -4,11 +4,24 @@ React + Vite frontend for the FastAPI project similarity service.
 
 ## Run locally
 
-From the project root, start the backend in one PowerShell terminal:
+Install Python (the backend is tested here with Python 3.14) and Node.js/npm first. From the project root, set up the backend in PowerShell once:
+
+```powershell
+python -m venv backend/.venv
+.\backend\.venv\Scripts\Activate.ps1
+python -m ensurepip --upgrade
+python -m pip install uv
+uv --no-cache --system-certs pip install --index-strategy unsafe-best-match -r backend/requirements.txt
+```
+
+The requirements use both PyPI and the official PyTorch CPU index. The index flag allows uv to resolve pinned packages across those two indexes.
+
+Start the backend in that terminal:
 
 ```powershell
 .\backend\.venv\Scripts\Activate.ps1
-$env:HF_HUB_OFFLINE = '1'
+Remove-Item Env:HF_HUB_OFFLINE -ErrorAction SilentlyContinue
+Remove-Item Env:TRANSFORMERS_OFFLINE -ErrorAction SilentlyContinue
 python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -21,7 +34,20 @@ npm run dev
 
 Open the localhost URL printed by Vite. Keep both terminals running. The Vite development server forwards `/api` requests to `http://127.0.0.1:8000`.
 
-The initial scores request may take longer because the backend loads its sentence-transformer model on first use. Offline mode uses the model already cached on this computer and avoids local certificate errors when contacting Hugging Face. On a fresh machine, download the configured model first with offline mode unset.
+The first scores request downloads the pinned sentence-transformer model from Hugging Face and may take longer. Internet access and valid TLS certificates are required for that download. The model is then cached locally.
+
+After a successful first request, you can optionally set `$env:HF_HUB_OFFLINE = '1'` before starting the backend to use the cached model without contacting Hugging Face. This only affects the similarity model; live Gemini agent calls still require network access and credentials. The Docker image downloads its model during the build, so its existing offline settings are intentional.
+
+## Backend development and agents
+
+For tests and development CLI tools, install the development requirements in the same activated environment. This file also includes the runtime dependencies:
+
+```powershell
+uv --no-cache --system-certs pip install --index-strategy unsafe-best-match -r backend/requirements-dev.txt
+python -m pytest backend/tests -m "not model and not gemini"
+```
+
+Google ADK, Google GenAI, and A2A dependencies remain included in the runtime requirements. See [the agent setup instructions](backend/app/agents/README.md) for credentials and `adk web`. The FastAPI A2A endpoint is opt-in through `ENABLE_A2A=1`; the React dashboard uses the similarity endpoints directly.
 
 ## Features
 
