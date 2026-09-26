@@ -14,6 +14,12 @@ __pycache__/
 .codegraph/
 dist
 dist-ssr
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+.env*
+!.env.example
 *.local
 
 # Editor directories and files
