@@ -46,7 +46,7 @@ export default async function DashboardPage() {
           <span>
             <Info size={15} aria-hidden="true" />
             {data.mode === "example"
-              ? "Overlap statistics use example data. The map shows locations from your project CSV."
+              ? "Overlap statistics use example data. The map shows a static reference dataset."
               : failed
                 ? "We couldn’t load project data. Check your backend connection and try again."
                 : "Live project data from your connected backend."}

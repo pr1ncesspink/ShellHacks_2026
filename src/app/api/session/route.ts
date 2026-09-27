@@ -6,7 +6,7 @@ import {
   isSecureRequest,
 } from "@/lib/session";
 import { exchangeSession } from "@/lib/session-exchange";
-import { verifyUser } from "@/lib/server/firebase-admin";
+import { verifyUser } from "@/lib/server/verify-firebase-token";
 
 export const runtime = "nodejs";
 

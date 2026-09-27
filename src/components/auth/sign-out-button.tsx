@@ -35,8 +35,10 @@ export function SignOutButton({
     try {
       await deleteSession();
     } catch {
+      // The session cookie is httpOnly, so let the server re-evaluate it:
+      // protected routes redirect to sign-in if the cookie is still invalid.
       finish();
-      setBusy(false);
+      window.location.replace("/");
       return;
     }
     clearVerificationEmailPending();

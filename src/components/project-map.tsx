@@ -100,7 +100,7 @@ export function ProjectMap() {
       </div>
       <div ref={container} className="project-map-canvas" role="region" aria-label={`Project location map: ${points.length} points. Use arrow keys to pan and plus or minus to zoom.`} />
       {message && <p className="project-map-message" role="status">{message}</p>}
-      <div className="map-footer"><span>{points.length} locations · {projectCount} projects</span><span>CSV location data</span></div>
+      <div className="map-footer"><span>{points.length} locations · {projectCount} projects</span><span>Static reference dataset</span></div>
       <p className="project-map-note">Orange: another project within 25 miles (inclusive). Blue: no other project within 25 miles. Hover or click for the year and details. Proximity does not confirm construction or schedule overlap.</p>
     </Card>
   );

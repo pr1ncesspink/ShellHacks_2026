@@ -66,7 +66,6 @@ export function SiteHeader({
             title="Sign out"
           >
             <LogOut size={17} aria-hidden="true" />
-            <span className="sr-only">Sign out</span>
           </SignOutButton>
         </div>
       </div>

@@ -84,7 +84,7 @@ export default async function BudgetPage() {
               </div>
             </Card>
           </section>
-          <MapPlaceholder budget />
+          <MapPlaceholder />
         </div>
         <p className="budget-disclaimer">
           <LockKeyhole size={14} aria-hidden="true" />

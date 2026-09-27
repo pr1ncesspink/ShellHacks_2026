@@ -35,6 +35,8 @@ export function readBackendConfig(env: BackendEnvironment): BackendConfig {
     if (url.username || url.password) {
       return { mode: "invalid", missing: ["BACKEND_URL"] };
     }
+    // Relative endpoint paths resolve under the base, so keep any path prefix.
+    if (!url.pathname.endsWith("/")) url.pathname += "/";
   } catch {
     return { mode: "invalid", missing: ["BACKEND_URL"] };
   }
@@ -45,6 +47,10 @@ export function readBackendConfig(env: BackendEnvironment): BackendConfig {
   }
   if (auth !== "google-oidc") {
     return { mode: "invalid", missing: ["BACKEND_AUTH"] };
+  }
+  // Google ID tokens are bearer credentials; never send them over plain http.
+  if (url.protocol !== "https:") {
+    return { mode: "invalid", missing: ["BACKEND_URL"] };
   }
 
   const required = [

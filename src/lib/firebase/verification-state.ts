@@ -1,5 +1,3 @@
-"use client";
-
 let verificationEmailPending = false;
 let verificationRecoveryVisible = false;
 
@@ -11,10 +9,6 @@ export function clearVerificationEmailPending(): void {
   verificationEmailPending = false;
 }
 
-export function isVerificationEmailPending(): boolean {
-  return verificationEmailPending;
-}
-
 export function establishVerificationRecovery(): () => void {
   verificationEmailPending = false;
   verificationRecoveryVisible = true;
@@ -23,11 +17,7 @@ export function establishVerificationRecovery(): () => void {
   };
 }
 
-export function isVerificationRecoveryVisible(): boolean {
-  return verificationRecoveryVisible;
-}
-
-export function shouldHoldVerificationRedirect(pathname: string): boolean {
+function shouldHoldVerificationRedirect(pathname: string): boolean {
   return (
     pathname === "/signup" &&
     (verificationEmailPending || verificationRecoveryVisible)

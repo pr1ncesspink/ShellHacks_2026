@@ -1,5 +1,3 @@
-"use client";
-
 import { getApp, getApps, initializeApp } from "firebase/app";
 import {
   browserLocalPersistence,
@@ -31,7 +29,11 @@ export function getFirebaseAuth(): Promise<Auth> {
       const auth = getAuth(app);
       await setPersistence(auth, browserLocalPersistence);
       return auth;
-    })();
+    })().catch((error: unknown) => {
+      // Do not cache a failed initialization; the next call retries.
+      authPromise = null;
+      throw error;
+    });
   }
   return authPromise;
 }

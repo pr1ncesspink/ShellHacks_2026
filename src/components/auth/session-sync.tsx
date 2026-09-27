@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { onIdTokenChanged } from "firebase/auth";
 import {
@@ -24,11 +24,38 @@ function currentDestination(): string {
 export function SessionSync() {
   const routePathname = usePathname();
   const router = useRouter();
+  const pathnameRef = useRef(routePathname);
+  const routerRef = useRef(router);
+  const observedUid = useRef<string | null | undefined>(undefined);
 
+  useEffect(() => {
+    pathnameRef.current = routePathname;
+    // The token listener no longer re-runs on navigation, so re-apply the
+    // unverified gate here without touching the session.
+    let disposed = false;
+    void getFirebaseAuth()
+      .then((auth) => {
+        const user = auth.currentUser;
+        if (disposed || !user || user.emailVerified) return;
+        if (isExplicitAuthActionActive()) return;
+        if (shouldStayForEmailVerification(routePathname)) return;
+        const next = encodeURIComponent(currentDestination());
+        window.location.replace(`/verify-email?next=${next}`);
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [routePathname]);
+
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
+
+  // Subscribe once per mount; soft navigations must not re-post the session.
   useEffect(() => {
     let disposed = false;
     let unsubscribe: (() => void) | undefined;
-    let observedUid: string | null | undefined;
 
     void getFirebaseAuth()
       .then((auth) => {
@@ -36,12 +63,12 @@ export function SessionSync() {
         unsubscribe = onIdTokenChanged(auth, async (user) => {
           if (isExplicitAuthActionActive()) return;
           const request = beginAuthSyncRequest();
-          const pathname = routePathname;
+          const pathname = pathnameRef.current;
           const protectedPath = isProtectedPath(pathname);
-          const previousUid = observedUid;
+          const previousUid = observedUid.current;
           try {
             if (!user) {
-              observedUid = await syncSessionIdentity({
+              observedUid.current = await syncSessionIdentity({
                 previousUid,
                 currentUid: null,
                 protectedPath,
@@ -55,11 +82,7 @@ export function SessionSync() {
                 onIdentityChanged: () => undefined,
                 onInitialProtectedIdentity: () => undefined,
               });
-              if (
-                request.isCurrent() &&
-                !protectedPath &&
-                pathname === "/verify-email"
-              ) {
+              if (request.isCurrent() && pathname === "/verify-email") {
                 window.location.replace("/");
               }
               return;
@@ -68,7 +91,7 @@ export function SessionSync() {
             if (!user.emailVerified) {
               await deleteSession(request.signal);
               if (!request.isCurrent()) return;
-              observedUid = user.uid;
+              observedUid.current = user.uid;
               if (shouldStayForEmailVerification(pathname)) {
                 return;
               }
@@ -77,7 +100,7 @@ export function SessionSync() {
               return;
             }
 
-            observedUid = await syncSessionIdentity({
+            observedUid.current = await syncSessionIdentity({
               previousUid,
               currentUid: user.uid,
               protectedPath,
@@ -98,7 +121,7 @@ export function SessionSync() {
               },
               onInitialProtectedIdentity: () => {
                 if (!request.isCurrent()) return;
-                router.refresh();
+                routerRef.current.refresh();
               },
             });
             if (!request.isCurrent()) return;
@@ -121,7 +144,7 @@ export function SessionSync() {
       unsubscribe?.();
       cancelAuthSyncRequests();
     };
-  }, [routePathname, router]);
+  }, []);
 
   return null;
 }

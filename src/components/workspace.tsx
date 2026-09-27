@@ -17,13 +17,13 @@ export function WorkspaceFooter() {
     </footer>
   );
 }
-export function MapPlaceholder({ budget = false }: { budget?: boolean }) {
+export function MapPlaceholder() {
   return (
     <Card className="map-card panel">
       <div className="panel-heading">
         <div>
           <span className="eyebrow">SPATIAL CONTEXT</span>
-          <h2>{budget ? "The bigger picture" : "Project landscape"}</h2>
+          <h2>The bigger picture</h2>
         </div>
         <span className="icon-tile">
           <Layers3 size={19} aria-hidden="true" />
@@ -39,11 +39,7 @@ export function MapPlaceholder({ budget = false }: { budget?: boolean }) {
           MAP PLACEHOLDER
         </Badge>
         <h3>Make room for perspective.</h3>
-        <p>
-          {budget
-            ? "Project locations and budget context will come together here."
-            : "Your project locations and overlapping areas will come together here."}
-        </p>
+        <p>Project locations and budget context will come together here.</p>
         <div className="coordinate-label" aria-hidden="true">
           GRIDLENS / SPATIAL VIEW
         </div>

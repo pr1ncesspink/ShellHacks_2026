@@ -3,7 +3,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE, safeNext } from "../session";
-import { verifyUser } from "./firebase-admin";
+import { verifyUser } from "./verify-firebase-token";
 import type { SessionUser } from "../session-exchange";
 
 export async function getUser(): Promise<SessionUser | null> {

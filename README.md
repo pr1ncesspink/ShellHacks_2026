@@ -22,7 +22,7 @@ Email/Password in Firebase Authentication. Open
 http://127.0.0.1:5173. Anyone can create an account at `/signup`; Firebase sends
 an email verification link, and `/dashboard`, `/budget`, and `/profile` stay
 server-protected until the address is verified. The profile displays the real
-Firebase name and email while organization, role, maps, and budget analysis stay
+Firebase name and email while organization, role, and budget analysis stay
 labeled as previews.
 
 Keep `BACKEND_URL` empty to use the explicitly labeled example dashboard:
@@ -41,7 +41,7 @@ BACKEND_URL=http://127.0.0.1:8000
 BACKEND_AUTH=none
 ```
 
-File selection accepts up to five PDF/PNG/JPG files, 20 MB each. Files stay in browser memory, are cleared when leaving the page, and are not uploaded or processed. Maps and budget analysis intentionally remain placeholders.
+File selection accepts up to five PDF/PNG/JPG files, 20 MB each. Files stay in browser memory, are cleared when leaving the page, and are not uploaded or processed. The dashboard map shows a static reference dataset of project locations; budget analysis intentionally remains a placeholder.
 
 For production:
 
