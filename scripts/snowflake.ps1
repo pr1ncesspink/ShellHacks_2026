@@ -33,7 +33,11 @@ foreach ($line in Get-Content -LiteralPath $envFile) {
     if (-not $match.Success -or $allowedNames -notcontains $match.Groups[1].Value) {
         throw "Invalid Snowflake environment-file entry."
     }
-    $name, $value = $match.Groups[1].Value, $match.Groups[2].Value
+    $name, $value = $match.Groups[1].Value, $match.Groups[2].Value.Trim()
+    # Accept dotenv-style quoting: KEY="value" or KEY='value'.
+    if ($value.Length -ge 2 -and ($value[0] -eq '"' -or $value[0] -eq "'") -and $value[-1] -eq $value[0]) {
+        $value = $value.Substring(1, $value.Length - 2)
+    }
     if ($value.StartsWith("<")) {
         throw "Replace placeholders in backend/.env.snowflake before running this command."
     }
@@ -48,18 +52,22 @@ if ($missingRequired) {
     throw "Missing required Snowflake environment-file settings."
 }
 
-$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-$startInfo.FileName = $python
-$startInfo.WorkingDirectory = $repoRoot
-$startInfo.UseShellExecute = $false
-$startInfo.ArgumentList.Add("-m")
-$startInfo.ArgumentList.Add("backend.projectdata")
-foreach ($argument in $CommandArgs) {
-    $startInfo.ArgumentList.Add($argument)
-}
+# Windows PowerShell 5.1 has no ProcessStartInfo.ArgumentList, so set the values for the
+# child launch and restore the caller's environment afterwards.
+$previous = @{}
 foreach ($name in $loadedNames) {
-    $startInfo.Environment[$name] = $entries[$name]
+    $previous[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+    [Environment]::SetEnvironmentVariable($name, $entries[$name], "Process")
 }
-$process = [System.Diagnostics.Process]::Start($startInfo)
-$process.WaitForExit()
-exit $process.ExitCode
+Push-Location -LiteralPath $repoRoot
+try {
+    & $python -m backend.projectdata @CommandArgs
+    $exitCode = $LASTEXITCODE
+}
+finally {
+    Pop-Location
+    foreach ($name in $loadedNames) {
+        [Environment]::SetEnvironmentVariable($name, $previous[$name], "Process")
+    }
+}
+exit $exitCode
