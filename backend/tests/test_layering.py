@@ -25,6 +25,10 @@ def test_services_and_core_do_not_import_fastapi_or_agent_runtime():
                 name == "google.adk" or name.startswith("google.adk.") or name == "a2a" or name.startswith("a2a.")
                 for name in imports
             )
+            assert not any(
+                name == "backend.documentparsing" or name.startswith("backend.documentparsing.")
+                for name in imports
+            )
 
 
 def test_agents_do_not_import_fastapi_or_api():
@@ -32,6 +36,10 @@ def test_agents_do_not_import_fastapi_or_api():
         imports = imported_modules(path)
         assert not any(name == "fastapi" or name.startswith("fastapi.") for name in imports)
         assert not any(name == "backend.app.api" or name.startswith("backend.app.api.") for name in imports)
+        assert not any(
+            name == "backend.documentparsing" or name.startswith("backend.documentparsing.")
+            for name in imports
+        )
 
 
 def test_cli_does_not_import_fastapi():

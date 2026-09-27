@@ -1,0 +1,10 @@
+{
+  "schema_version": "projects-v1",
+  "project_count": 7,
+  "overlap_count": 6,
+  "eligible_overlap_ids": ["OVL_2", "OVL_5"],
+  "collision_exclusions": [],
+  "geocoding": {},
+  "rules": {"distance_miles_exclusive": 25, "max_in_service_gap_days_inclusive": 365, "timing_basis": "in_service_date_proxy"},
+  "warnings": []
+}
