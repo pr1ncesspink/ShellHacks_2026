@@ -8,6 +8,11 @@ The uploaded PDF or CSV is re-validated before any Snowflake call, the session e
 document (best effort, see ``progress.ProgressReporter``). After a successful run the
 upload is summarized (stage ``summarizing``); a summary failure never fails the job.
 Processing failures exit 0 because the job runs with max-retries 0 (no double billing).
+
+The owner may cancel the session at any time. The job records its Cloud Run execution
+name (``CLOUD_RUN_EXECUTION``) so the API can cancel it, and also stops cooperatively at
+safe points (before download, before processing, after processing and before summarizing):
+a cancelled session is never summarized and its final status is never written over.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import logging
+import os
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -22,7 +28,7 @@ from tempfile import TemporaryDirectory
 from .gcs import PreconditionFailed
 from .progress import ProgressReporter
 from .upload_sessions import (
-    UploadConfig, iso, object_name, session_kind, session_name, utc_now, validate_download,
+    UploadConfig, execution_name, iso, object_name, session_kind, session_name, utc_now, validate_download,
     validate_object, validate_session_id, SessionError,
 )
 
@@ -98,38 +104,69 @@ def _summarize(summarize, store, upload_id, owner, reporter, session_id) -> None
         log.error("session %s summary failed: %s", session_id, type(exc).__name__)
 
 
-def _write_final(gcs, key, session_id, document, generation) -> None:
+class _Cancelled(Exception):
+    """The owner cancelled the session; stop at this safe point."""
+
+
+def _cancelled(gcs, key) -> bool:
+    """True when the stored session is cancelled (a read error counts as not cancelled)."""
+    try:
+        current, _ = gcs.read_json(key)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("session status re-read failed: %s", type(exc).__name__)
+        return False
+    return isinstance(current, dict) and current.get("status") == "cancelled"
+
+
+def _check_cancel(gcs, key, reporter) -> None:
+    if reporter.cancelled or _cancelled(gcs, key):
+        raise _Cancelled()
+
+
+def _write_final(gcs, key, session_id, document, generation) -> str | None:
+    """Write the final status; return the status now stored (None when unknown).
+
+    Never writes over a document that is no longer ``processing`` (for example cancelled).
+    """
     try:
         gcs.write_json(key, document, if_generation_match=generation)
-        return
+        return document["status"]
     except PreconditionFailed:
         pass
     except Exception as exc:  # noqa: BLE001
         log.error("session %s status write failed: %s", session_id, type(exc).__name__)
-        return
+        return None
     # A progress write may have landed without its generation being observed (for
     # example a transport error after the commit). Only this job writes a processing
     # session, so retry once on top of the current document if it is still processing.
     try:
         current, current_generation = gcs.read_json(key)
-        if current is None or current.get("status") != "processing":
+        status = current.get("status") if isinstance(current, dict) else None
+        if status == "cancelled":
+            log.info("session %s was cancelled; final status not written", session_id)
+            return "cancelled"
+        if status != "processing":
             log.error("session %s status write lost a race", session_id)
-            return
+            return status
         gcs.write_json(key, {**current, **{k: document[k] for k in
                                            ("status", "error_code", "upload_id", "updated_at")}},
                        if_generation_match=current_generation)
+        return document["status"]
     except Exception as exc:  # noqa: BLE001
         log.error("session %s status write failed: %s", session_id, type(exc).__name__)
+        return None
 
 
 def run(session_id: str, *, gcs, config: UploadConfig, store_factory=snowflake_store,
-        process=default_process, summarize=None, clock=utc_now) -> str | None:
-    """Process a queued session; return the final status written (None if skipped).
+        process=default_process, summarize=None, clock=utc_now, env=None) -> str | None:
+    """Process a queued session; return the final status (None if skipped).
 
+    Returns ``cancelled`` when the owner cancelled the session while it ran.
     ``summarize(store, upload_id, owner, *, progress=None)`` defaults to
     ``backend.projectdata.summary.summarize_upload`` (looked up at call time).
     """
     summarize = summarize or default_summarize
+    env = os.environ if env is None else env
     key = session_name(session_id)
     document, generation = gcs.read_json(key)
     if document is None or document.get("status") != "queued":
@@ -142,7 +179,9 @@ def run(session_id: str, *, gcs, config: UploadConfig, store_factory=snowflake_s
         return None
     name = object_name(session_id, kind)
     try:
-        document = {**document, "status": "processing", "updated_at": iso(clock())}
+        document = {**document, "status": "processing",
+                    "job_execution": execution_name(env.get("CLOUD_RUN_EXECUTION")),
+                    "updated_at": iso(clock())}
         generation = gcs.write_json(key, document, if_generation_match=generation)
     except PreconditionFailed:
         log.warning("session %s changed concurrently; not processing", session_id)
@@ -151,12 +190,15 @@ def run(session_id: str, *, gcs, config: UploadConfig, store_factory=snowflake_s
     reporter = ProgressReporter(gcs, key, document, generation, clock=clock)
     limit = config.limit(kind)
     final = {"status": "failed", "error_code": "internal", "upload_id": None}
+    cancelled = False
+    written = None
     try:
         reporter("validating")
         error_code, _ = validate_object(gcs, name, limit, kind)
         if error_code:
             final["error_code"] = error_code
         else:
+            _check_cancel(gcs, key, reporter)
             with TemporaryDirectory(prefix="gridlock-session-") as directory:
                 path = Path(directory) / f"plan.{kind}"
                 try:
@@ -168,12 +210,19 @@ def run(session_id: str, *, gcs, config: UploadConfig, store_factory=snowflake_s
                     if error_code:
                         final["error_code"] = error_code
                     else:
+                        _check_cancel(gcs, key, reporter)
                         with store_factory() as store:
                             result = process(path, _ReferenceGuardedStore(store), progress=reporter)
                             upload_id = result["upload_id"]
+                            # Rows saved by a cancelled run stay unreachable (no upload_id is
+                            # ever exposed); never spend a summary on them.
+                            _check_cancel(gcs, key, reporter)
                             _summarize(summarize, store, upload_id, document.get("owner", ""),
                                        reporter, session_id)
                         final = {"status": "succeeded", "error_code": None, "upload_id": upload_id}
+    except _Cancelled:
+        cancelled = True
+        log.info("session %s was cancelled; stopping", session_id)
     except Exception as exc:  # noqa: BLE001 - report a generic code, never the message
         final["error_code"] = classify(exc)
         log.error("session %s failed: %s", session_id, type(exc).__name__)
@@ -183,9 +232,13 @@ def run(session_id: str, *, gcs, config: UploadConfig, store_factory=snowflake_s
             gcs.delete(name)
         except Exception as exc:  # noqa: BLE001
             log.error("session %s object delete failed: %s", session_id, type(exc).__name__)
-        # The last progress document keeps its stage, so a failure shows where it stopped.
-        _write_final(gcs, key, session_id, {**reporter.document, **final, "updated_at": iso(clock())},
-                     reporter.generation)
+        if not cancelled:
+            # The last progress document keeps its stage, so a failure shows where it stopped.
+            written = _write_final(gcs, key, session_id,
+                                   {**reporter.document, **final, "updated_at": iso(clock())},
+                                   reporter.generation)
+    if cancelled or written == "cancelled":
+        return "cancelled"
     return final["status"]
 
 

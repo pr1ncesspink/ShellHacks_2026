@@ -5,6 +5,10 @@ written with ifGenerationMatch so only one ``created -> queued`` transition (and
 job launch) can win. The object is ``uploads/<id>.pdf`` or ``uploads/<id>.csv`` depending
 on the session ``kind`` (derived server-side from an allow-listed content type); user
 filenames are never used. Sessions without a recorded kind are PDF sessions.
+
+A session can be cancelled by its owner from any non-terminal status; ``cancelled`` is
+terminal, and the job and progress writes never overwrite it (every write is
+generation-matched and the job re-checks the status at safe points).
 """
 
 from __future__ import annotations
@@ -32,7 +36,10 @@ KINDS = {PDF_CONTENT_TYPE: "pdf", CSV_CONTENT_TYPE: "csv"}
 CONTENT_TYPES = {kind: content_type for content_type, kind in KINDS.items()}
 CSV_REQUIRED_COLUMNS = ("project_id", "project_name", "utility")
 CSV_HEADER_PREFIX_BYTES = 65_536
-STATUSES = ("created", "queued", "processing", "succeeded", "failed")
+STATUSES = ("created", "queued", "processing", "succeeded", "failed", "cancelled")
+TERMINAL_STATUSES = ("succeeded", "failed", "cancelled")
+EXECUTION_NAME = re.compile(r"^[a-z0-9-]{1,63}$")
+CANCEL_ATTEMPTS = 3
 STAGES = ("validating", "staging", "parsing", "extracting", "locating", "matching", "saving",
           "summarizing")
 ERROR_CODES = ("invalid_pdf", "invalid_csv", "too_large", "snowflake_failed",
@@ -96,6 +103,13 @@ def validate_session_id(value) -> str:
     return value
 
 
+def execution_name(value) -> str | None:
+    """A Cloud Run execution short name (``^[a-z0-9-]{1,63}$``) or None."""
+    if isinstance(value, str) and EXECUTION_NAME.fullmatch(value):
+        return value
+    return None
+
+
 def kind_for_content_type(content_type) -> str:
     """Map a client-declared content type onto an allow-listed kind (omitted = pdf)."""
     if content_type is None:
@@ -136,11 +150,13 @@ def utc_now() -> datetime:
 
 
 class JobLauncher:
-    """Start one execution of the upload Cloud Run Job via the Run Admin v2 API."""
+    """Start (or cancel) executions of the upload Cloud Run Job via the Run Admin v2 API."""
 
     def __init__(self, session, job_name: str, region: str = "us-east1", *, timeout: float = 30.0):
         refuse_firebase_project(job_name, region)
         self.session = session
+        self.job_name = job_name
+        self.region = region
         self.url = (f"https://run.googleapis.com/v2/projects/{PROJECT_ID}/locations/{region}"
                     f"/jobs/{job_name}:run")
         self.timeout = timeout
@@ -153,6 +169,16 @@ class JobLauncher:
         response = self.session.post(self.url, json=body, timeout=self.timeout)
         if not 200 <= response.status_code < 300:
             raise RuntimeError(f"Cloud Run job launch returned HTTP {response.status_code}")
+
+    def cancel(self, execution: str) -> None:
+        """Cancel one execution by short name; a non-2xx response raises RuntimeError."""
+        if execution_name(execution) is None:
+            raise ValueError("Malformed Cloud Run execution name")
+        url = (f"https://run.googleapis.com/v2/projects/{PROJECT_ID}/locations/{self.region}"
+               f"/jobs/{self.job_name}/executions/{execution}:cancel")
+        response = self.session.post(url, json={}, timeout=self.timeout)
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError(f"Cloud Run execution cancel returned HTTP {response.status_code}")
 
 
 def csv_header_ok(data: bytes, *, complete: bool) -> bool:
@@ -336,6 +362,39 @@ class SessionService:
                 pass
             raise SessionError(502, "Processing could not be started") from None
         return 202, {"status": "queued"}
+
+    def cancel(self, owner: str, session_id: str) -> dict:
+        """Cancel a non-terminal session (idempotent); terminal sessions are returned unchanged.
+
+        The status write is generation-matched, so a concurrent job/final write either lands
+        first (and is then returned unchanged if terminal) or loses to the cancel. Deleting
+        the object and cancelling the recorded Cloud Run execution are best effort.
+        """
+        for _ in range(CANCEL_ATTEMPTS):
+            document, generation = self._load(owner, session_id)
+            if document["status"] in TERMINAL_STATUSES:
+                return self.view(document)
+            try:
+                updated, _ = self._write(document, generation, status="cancelled",
+                                         cancelled_at=iso(self.clock()))
+            except PreconditionFailed:
+                continue
+            self._cancel_cleanup(document)
+            return self.view(updated)
+        raise SessionError(502, "The upload could not be cancelled; try again")
+
+    def _cancel_cleanup(self, document: dict) -> None:
+        # Nothing here may turn a recorded cancel into an error.
+        try:
+            self.gcs.delete(object_name(document["session_id"], session_kind(document)))
+        except Exception:  # noqa: BLE001
+            pass
+        execution = execution_name(document.get("job_execution"))
+        if execution and self.launcher is not None:
+            try:
+                self.launcher.cancel(execution)
+            except Exception:  # noqa: BLE001
+                pass
 
     def status(self, owner: str, session_id: str) -> dict:
         document, _ = self._load(owner, session_id)

@@ -147,7 +147,7 @@ authenticated access until tenant identity and ownership checks are implemented.
 
 The browser uploads the PDF or projects CSV directly to Cloud Storage with a V4 signed PUT URL, then
 a Cloud Run Job runs the existing `process_plan`. Neither Vercel nor a Cloud Run request
-body carries the file. All three routes require `X-Authenticated-User` (set by the
+body carries the file. All four routes require `X-Authenticated-User` (set by the
 Next.js server). A session owned by another user returns 404. Session IDs must match
 `^SES_[a-f0-9]{32}$`; any other ID returns 422 before any storage call.
 
@@ -155,7 +155,8 @@ Next.js server). A session owned by another user returns 404. Session IDs must m
 | --- | --- |
 | `POST /projects/upload-sessions` `{"size_bytes": n, "content_type"?: "application/pdf" or "text/csv"}` | 201 `{session_id, upload_url, method: "PUT", required_headers: {"Content-Type": <content_type>, "x-goog-content-length-range": "1,<MAX>"}, expires_at}`. `content_type` is optional and defaults to `application/pdf` (the pre-CSV request shape still works). Any other value, or `n` outside 1..the kind's cap (`UPLOAD_MAX_BYTES` for PDF, `UPLOAD_MAX_CSV_BYTES` for CSV), returns 422 before any storage call. |
 | `POST /projects/upload-sessions/{id}/process` | 202 `{status: "queued"}` and exactly one job launch. A repeat returns 200 with the GET shape. A missing object returns 409. An object that fails its kind's checks (below) returns 422, records `invalid_pdf`/`invalid_csv`/`too_large`, and deletes the object. |
-| `GET /projects/upload-sessions/{id}` | `{session_id, status, upload_id, error_code, updated_at}`, plus `kind: "csv"` for CSV sessions (omitted for PDF), plus `stage`, `stage_detail`, `stage_started_at` when `status` is `processing` or `failed` (see *Processing stages*). `status` is `created`, `queued`, `processing`, `succeeded`, or `failed`. |
+| `GET /projects/upload-sessions/{id}` | `{session_id, status, upload_id, error_code, updated_at}`, plus `kind: "csv"` for CSV sessions (omitted for PDF), plus `stage`, `stage_detail`, `stage_started_at` when `status` is `processing` or `failed` (see *Processing stages*). `status` is `created`, `queued`, `processing`, `succeeded`, `failed`, or `cancelled`. A `cancelled` view is exactly `{session_id, status: "cancelled", upload_id: null, error_code: null, updated_at}` (+ `kind` for CSV), with no stage keys. |
+| `POST /projects/upload-sessions/{id}/cancel` | Always 200 with the GET shape. A `created`, `queued` or `processing` session becomes `cancelled` (terminal; `cancelled_at` is recorded in the document); a session that is already `succeeded`, `failed` or `cancelled` is returned unchanged (idempotent, never 409). Unknown or foreign sessions return 404, a malformed id 422 (before any storage call), a storage error 502. Not rate-limited. |
 
 - The browser PUTs to `upload_url` with the `required_headers` exactly as given. The URL
   expires after 900 seconds. The object name is `uploads/<session_id>.pdf` or
@@ -191,7 +192,39 @@ Next.js server). A session owned by another user returns 404. Session IDs must m
 - If the job cannot be launched, the process call returns 502. The object delete and the
   `failed`/`internal` write are both best effort.
 - Configuration that references the Firebase project `shellhacks26-c78d4` is refused.
-  Missing configuration returns 503. The two POST routes count against the agent rate limit.
+  Missing configuration returns 503. The create and `/process` POST routes count against
+  the agent rate limit; `/cancel` does not (it only stops work).
+
+### Cancel
+
+`SessionService.cancel` loads the session (owner-checked), returns it unchanged if it is
+terminal, and otherwise writes `status: "cancelled"` + `cancelled_at` with
+`ifGenerationMatch`. On a lost race it re-reads and tries again (at most 3 attempts; a
+concurrent terminal job write that lands first wins and is returned unchanged; three lost
+races return 502). After the cancel is recorded, two best-effort steps follow and their
+errors are swallowed, so a cancel never fails because of them:
+
+1. delete `uploads/<id>.<kind>`;
+2. cancel the recorded Cloud Run execution via
+   `POST https://run.googleapis.com/v2/projects/shellhacks-2026/locations/<region>/jobs/<job>/executions/<execution>:cancel`
+   (`JobLauncher.cancel`; the name must match `^[a-z0-9-]{1,63}$`).
+
+The job records its execution name (`CLOUD_RUN_EXECUTION`, validated, else `null`) as
+`job_execution` in its `queued -> processing` write, so a session cancelled while still
+`queued` has no execution to cancel; the job then finds it not queued and exits. The job also
+stops cooperatively: it re-reads the session after validating (before download), before
+opening the Snowflake store, and after `process_plan` (before summarizing), and a progress
+write that loses a race re-reads the document and flags the cancel. A cancelled run is never
+summarized, never writes its final status, and returns `cancelled`; `_write_final` refuses to
+overwrite any document that is no longer `processing` (it logs `cancelled`).
+
+- **Orphan rows:** if the cancel lands after `ProjectStore.save_upload`, the upload's
+  Snowflake rows remain but are unreachable (a cancelled session never exposes its
+  `upload_id`). They are not rolled back.
+- **Summarize window:** the last checkpoint is before `summarize_upload`. A cancel that
+  lands while the summary is being generated does not interrupt it (unless the execution
+  cancel stops the container); the summary row may be written for the orphaned upload,
+  but the session stays `cancelled`.
 
 ### Processing stages
 
@@ -296,6 +329,21 @@ changing this code.
    quoting the whole flag in PowerShell:
    `gcloud run jobs update shellhacks-upload-job --project=shellhacks-2026 --region=us-east1 --image=<same image as shellhacks-api> '--update-env-vars=GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=shellhacks-2026,GOOGLE_CLOUD_LOCATION=global,DIAGNOSIS_MODEL=gemini-3.1-flash-lite'`
 4. Deploy the frontend last, so it never calls routes the backend does not serve yet.
+
+**Deploy order** (cancel release; no env changes):
+
+1. Confirm the runtime service account can cancel executions (the role bound on the job
+   must include `run.executions.cancel`):
+   `gcloud iam roles describe roles/run.jobsExecutorWithOverrides --format=json | findstr executions.cancel`
+   If it is missing, grant `roles/run.developer` on the job only:
+   `gcloud run jobs add-iam-policy-binding shellhacks-upload-job --project=shellhacks-2026 --region=us-east1 --member="serviceAccount:shellhacks-api-runtime@shellhacks-2026.iam.gserviceaccount.com" --role=roles/run.developer`
+   (Without it, cancel still marks the session `cancelled` and deletes the object; the job
+   then stops at its next checkpoint instead of immediately.)
+2. Deploy the `shellhacks-api` service (new `/cancel` route).
+3. Update the `shellhacks-upload-job` image to the same tag (records `job_execution`,
+   cooperative cancel checks):
+   `gcloud run jobs update shellhacks-upload-job --project=shellhacks-2026 --region=us-east1 --image=<same image as shellhacks-api>`
+4. Deploy the frontend last.
 
 Operational notes:
 
