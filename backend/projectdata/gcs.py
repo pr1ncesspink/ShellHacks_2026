@@ -18,6 +18,8 @@ from urllib.parse import quote
 FIREBASE_PROJECT_ID = "shellhacks26-c78d4"
 GCS_HOST = "storage.googleapis.com"
 PDF_CONTENT_TYPE = "application/pdf"
+CSV_CONTENT_TYPE = "text/csv"
+SIGNABLE_CONTENT_TYPES = (PDF_CONTENT_TYPE, CSV_CONTENT_TYPE)
 MAX_SIGNED_URL_SECONDS = 900
 _API = f"https://{GCS_HOST}/storage/v1/b"
 _UPLOAD_API = f"https://{GCS_HOST}/upload/storage/v1/b"
@@ -52,9 +54,11 @@ class SignedPut:
 
 
 def sign_put_url(bucket: str, name: str, max_bytes: int, expires_s: int, signer, email: str,
-                 now: datetime) -> SignedPut:
+                 now: datetime, *, content_type: str = PDF_CONTENT_TYPE) -> SignedPut:
     """Return a V4 signed PUT URL bound to Content-Type and x-goog-content-length-range."""
     refuse_firebase_project(bucket, email)
+    if content_type not in SIGNABLE_CONTENT_TYPES:
+        raise ValueError("Unsupported upload content type")
     if not 0 < expires_s <= MAX_SIGNED_URL_SECONDS:
         raise ValueError("Signed URL expiry must be between 1 and 900 seconds")
     if type(max_bytes) is not int or max_bytes < 1:
@@ -63,7 +67,7 @@ def sign_put_url(bucket: str, name: str, max_bytes: int, expires_s: int, signer,
     timestamp = now.strftime("%Y%m%dT%H%M%SZ")
     scope = f"{now.strftime('%Y%m%d')}/auto/storage/goog4_request"
     headers = {
-        "content-type": PDF_CONTENT_TYPE,
+        "content-type": content_type,
         "host": GCS_HOST,
         "x-goog-content-length-range": f"1,{max_bytes}",
     }
@@ -88,7 +92,7 @@ def sign_put_url(bucket: str, name: str, max_bytes: int, expires_s: int, signer,
     signature = signer.sign(string_to_sign.encode("utf-8")).hex()
     return SignedPut(
         url=f"https://{GCS_HOST}{path}?{canonical_query}&X-Goog-Signature={signature}",
-        headers={"Content-Type": PDF_CONTENT_TYPE, "x-goog-content-length-range": f"1,{max_bytes}"},
+        headers={"Content-Type": content_type, "x-goog-content-length-range": f"1,{max_bytes}"},
         expires_at=now + timedelta(seconds=expires_s),
         canonical_request=canonical_request,
         string_to_sign=string_to_sign,

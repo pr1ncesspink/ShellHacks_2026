@@ -112,7 +112,9 @@ def build_workbook(projects: list[dict], overlaps: list[dict]) -> dict:
 
 def run_pipeline(inputs, output_dir, *, starter_workbook=None, utility="", state="", client=None,
                  cache_dir=".cache/geocoding", osm_snapshot=None, refresh_locations=False,
-                 user_agent="", audit_inputs=(), compute_overlaps=True):
+                 user_agent="", audit_inputs=(), compute_overlaps=True, progress=None):
+    """Extract, locate and (optionally) overlap projects; ``progress`` is an optional observer
+    called as ``progress(stage, done=None, total=None)`` and must not raise."""
     paths = list(dict.fromkeys(Path(path).resolve() for path in inputs))
     audits = [Path(path).resolve() for path in audit_inputs]
     seed_path = Path(starter_workbook).resolve() if starter_workbook else None
@@ -145,7 +147,8 @@ def run_pipeline(inputs, output_dir, *, starter_workbook=None, utility="", state
             else:
                 if client is None:
                     client = stack.enter_context(SnowflakeClient(SnowflakeSettings.from_env()))
-                parsed, report = extract_document(path, client, utility=utility, state=state, audit_only=audit_only)
+                parsed, report = extract_document(path, client, utility=utility, state=state,
+                                                  audit_only=audit_only, progress=progress)
             projects.extend(parsed)
             source_reports.append(report)
     if not projects:
@@ -159,6 +162,8 @@ def run_pipeline(inputs, output_dir, *, starter_workbook=None, utility="", state
         source_reports.append(seed_report)
     resolver = Resolver(cache_dir, seed, network=refresh_locations, user_agent=user_agent, snapshot=osm_snapshot)
     resolvable = [p for p in projects if p.get("utility") and p.get("state")]
+    if progress is not None:
+        progress("locating")
     review = resolver.resolve(resolvable)
     for project in projects:
         project["lat_center"], project["lon_center"] = center(project)

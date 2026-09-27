@@ -1,11 +1,11 @@
-"""Direct-to-GCS large PDF upload sessions processed asynchronously by a Cloud Run Job."""
+"""Direct-to-GCS large PDF/CSV upload sessions processed asynchronously by a Cloud Run Job."""
 
 from __future__ import annotations
 
 import re
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
-from pydantic import BaseModel, ConfigDict, StrictInt
+from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 
 from backend.projectdata.upload_sessions import SessionError, validate_session_id
 
@@ -17,6 +17,8 @@ OWNER = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     size_bytes: StrictInt
+    # Allow-listed server-side (application/pdf | text/csv); omitted means PDF.
+    content_type: StrictStr | None = None
 
 
 def get_session_service():
@@ -65,7 +67,7 @@ def _call(function, *args):
 @router.post("/upload-sessions", status_code=201)
 def create_upload_session(body: CreateSessionRequest, owner: str = Depends(authenticated_owner),
                           service=Depends(get_session_service)):
-    return _call(service.create, owner, body.size_bytes)
+    return _call(service.create, owner, body.size_bytes, body.content_type)
 
 
 @router.post("/upload-sessions/{session_id}/process", status_code=202)

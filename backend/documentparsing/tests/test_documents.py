@@ -598,5 +598,38 @@ raise SystemExit(main(sys.argv[1:]))
             self.assertFalse(any(name.startswith(forbidden) for name in modules), file.name)
 
 
+class ProgressTests(unittest.TestCase):
+    def test_run_pipeline_reports_document_stages_in_order(self):
+        events = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pdf = root / "plan.pdf"
+            pdf.write_bytes(input_bytes(".pdf"))
+            run_pipeline([pdf], root / "out", client=FakeCortex(), cache_dir=root / "cache",
+                         progress=lambda stage, done=None, total=None: events.append((stage, done, total)))
+        self.assertEqual(events, [("staging", None, None), ("parsing", None, None),
+                                  ("extracting", 0, 1), ("extracting", 1, 1), ("locating", None, None)])
+
+    def test_structured_inputs_report_only_locating(self):
+        events = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "projects.csv"
+            path.write_text("project_id,project_name,utility,state\nA,Alpha,Utility A,SC\n", encoding="utf-8")
+            run_pipeline([path], root / "out", cache_dir=root / "cache",
+                         progress=lambda stage, done=None, total=None: events.append(stage))
+        self.assertEqual(events, ["locating"])
+
+    def test_bad_input_emits_no_progress(self):
+        events = []
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bad.pdf"
+            path.write_bytes(b"not a PDF")
+            provider = FakeCortex()
+            with self.assertRaises(ValueError):
+                extract_document(path, provider, progress=lambda *args: events.append(args))
+        self.assertEqual((events, provider.calls), ([], []))
+
+
 if __name__ == "__main__":
     unittest.main()

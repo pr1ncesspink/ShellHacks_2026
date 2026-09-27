@@ -386,12 +386,19 @@ def fake_store():
     yield object()
 
 
+@pytest.fixture(autouse=True)
+def no_summary(monkeypatch):
+    """Job tests never reach the real summary module (stubbed per the W6 handshake)."""
+    monkeypatch.setattr(upload_job, "default_summarize",
+                        lambda store, upload_id, owner, *, progress=None: "rule_only")
+
+
 def test_job_success_writes_upload_id_and_deletes_object():
     gcs = FakeGcs()
     service, sid = queued_session(gcs)
     calls = []
 
-    def process_plan(path, store):
+    def process_plan(path, store, progress=None):
         calls.append(path.read_bytes())
         return {"upload_id": "UPL_" + "b" * 32}
 
@@ -410,7 +417,7 @@ def test_job_failure_is_generic_and_deletes_object(error, code):
     gcs = FakeGcs()
     service, sid = queued_session(gcs)
 
-    def process_plan(path, store):
+    def process_plan(path, store, progress=None):
         raise error
 
     assert upload_job.run(sid, gcs=gcs, config=service.config, store_factory=fake_store,
@@ -444,7 +451,7 @@ def test_job_classifies_reference_lookup_errors(store, code):
     def factory():
         yield store
 
-    def process_plan(path, guarded):
+    def process_plan(path, guarded, progress=None):
         seen.append(guarded.client)
         guarded.reference()
 
@@ -463,7 +470,7 @@ def test_job_config_value_error_is_internal():
         yield  # pragma: no cover
 
     assert upload_job.run(sid, gcs=gcs, config=service.config, store_factory=factory,
-                          process=lambda path, store: None) == "failed"
+                          process=lambda path, store, progress=None: None) == "failed"
     assert gcs.doc(sid)["error_code"] == "internal"
     assert "SNOWFLAKE" not in json.dumps(gcs.doc(sid))
 
@@ -474,7 +481,7 @@ def test_job_rejects_tampered_object_before_processing():
     gcs._put(object_name(sid), b"MZ-not-a-pdf")
     called = []
     status = upload_job.run(sid, gcs=gcs, config=service.config, store_factory=fake_store,
-                            process=lambda path, store: called.append(path))
+                            process=lambda path, store, progress=None: called.append(path))
     assert status == "failed" and called == []
     assert gcs.doc(sid)["error_code"] == "invalid_pdf" and object_name(sid) in gcs.deleted
 
@@ -489,7 +496,7 @@ def test_job_skips_non_queued_sessions_and_main_exit_codes():
 
     _, queued = queued_session(gcs)
 
-    def process_plan(path, store):
+    def process_plan(path, store, progress=None):
         raise SnowflakeError("x")
 
     assert upload_job.main(["--session", queued], gcs=gcs, config=service.config,
