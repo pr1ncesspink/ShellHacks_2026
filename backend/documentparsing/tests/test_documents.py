@@ -303,6 +303,8 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(len(bodies), 5)
         self.assertTrue(all("IF NOT EXISTS" in body["statement"] for body in bodies[-3:]))
         self.assertTrue(all("database" not in body for body in bodies[-3:]))
+        # The SQL API rejects session parameters such as AUTOCOMMIT with HTTP 400 (code 391917).
+        self.assertTrue(all("parameters" not in body for body in bodies))
 
     def test_sql_failures_do_not_leak_response_details(self):
         def handler(_):

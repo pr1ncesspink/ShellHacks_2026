@@ -104,8 +104,8 @@ class SnowflakeClient:
 
     def execute(self, statement: str, values=(), *, context=True) -> dict:
         body = {"statement": statement, "timeout": self.settings.statement_timeout,
-                "warehouse": self.settings.warehouse.upper(),
-                "parameters": {"AUTOCOMMIT": "true"}}
+                "warehouse": self.settings.warehouse.upper()}
+        # No AUTOCOMMIT parameter: the SQL API rejects it (code 391917) and autocommits single statements.
         if context:
             body.update(database=self.settings.database.upper(), schema=self.settings.schema.upper())
         if self.settings.role:
