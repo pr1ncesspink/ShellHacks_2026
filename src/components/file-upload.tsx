@@ -19,6 +19,7 @@ import { UploadStepper } from "@/components/upload-stepper";
 import {
   GENERIC_API_ERROR,
   cancelUploadSession,
+  isSessionNotFoundError,
   isTerminalStatus,
   isUploadCancelled,
   pollUploadSession,
@@ -51,7 +52,7 @@ type Item = UploadItem<File>;
 type Dispatch = ActionDispatch<[action: UploadListAction<File>]>;
 
 type PlanUploadContextValue = {
-  state: { items: Item[]; rejections: Rejection<File>[]; dragging: boolean };
+  state: { items: Item[]; rejections: Rejection<File>[]; dragging: boolean; expiredLinks: number };
   actions: {
     addFiles: (files: FileList | readonly File[] | null) => void;
     retry: (id: string) => void;
@@ -85,6 +86,7 @@ async function followSession(
   controllers: Map<string, AbortController>,
   cancels: Map<string, AbortController>,
   dispatch: Dispatch,
+  onExpired: () => void,
 ) {
   const controller = new AbortController();
   controllers.set(id, controller);
@@ -97,6 +99,12 @@ async function followSession(
     cancels.get(id)?.abort();
   } catch (reason) {
     if (isUploadCancelled(reason, controller.signal)) return;
+    if (isSessionNotFoundError(reason)) {
+      // An old in-progress link: drop the row quietly instead of showing a failure.
+      dispatch({ type: "remove", id });
+      onExpired();
+      return;
+    }
     dispatch({ type: "error", id, attempt, message: errorDetail(reason) });
   } finally {
     if (controllers.get(id) === controller) controllers.delete(id);
@@ -141,6 +149,7 @@ export function PlanUploadProvider({
   const [items, dispatch] = useReducer(uploadListReducer<File>, initialItems);
   const [rejections, setRejections] = useState<Rejection<File>[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [expiredLinks, setExpiredLinks] = useState(0);
   /** Upload or polling run per row. */
   const controllers = useRef(new Map<string, AbortController>());
   /** In-flight server cancel per row. */
@@ -160,7 +169,10 @@ export function PlanUploadProvider({
     const runs = controllers.current;
     const pending = cancels.current;
     for (const item of initialItems) {
-      if (item.sessionId) void followSession(item.id, item.sessionId, item.attempt, runs, pending, dispatch);
+      if (item.sessionId) {
+        void followSession(item.id, item.sessionId, item.attempt, runs, pending, dispatch,
+          () => setExpiredLinks((count) => count + 1));
+      }
     }
     return () => {
       for (const controller of [...runs.values(), ...pending.values()]) controller.abort();
@@ -289,7 +301,7 @@ export function PlanUploadProvider({
   }
 
   const value: PlanUploadContextValue = {
-    state: { items, rejections, dragging },
+    state: { items, rejections, dragging, expiredLinks },
     actions: { addFiles, retry, cancel, remove, setDragging },
     meta: { constraintsId, inputId },
   };
@@ -490,11 +502,22 @@ export function PlanUploadList() {
 }
 
 export function PlanUploadNote() {
+  const { state } = usePlanUpload();
   return (
-    <p data-slot="plan-upload-note" className="plan-upload-note">
-      <Info size={16} aria-hidden="true" />
-      Files are stored temporarily for processing, then deleted.
-    </p>
+    <>
+      {state.expiredLinks > 0 && (
+        <p data-slot="plan-upload-note" className="plan-upload-note" role="status">
+          <Info size={16} aria-hidden="true" />
+          {state.expiredLinks === 1
+            ? "That earlier upload link has expired. Choose the file again to check it."
+            : "Those earlier upload links have expired. Choose the files again to check them."}
+        </p>
+      )}
+      <p data-slot="plan-upload-note" className="plan-upload-note">
+        <Info size={16} aria-hidden="true" />
+        Files are stored temporarily for processing, then deleted.
+      </p>
+    </>
   );
 }
 
