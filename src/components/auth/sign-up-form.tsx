@@ -117,7 +117,7 @@ export function SignUpForm() {
   return (
     <Card className="login-card panel">
       <div className="login-card-top">
-        <span className="icon-tile blue">
+        <span className="icon-tile violet">
           <UserPlus size={23} aria-hidden="true" />
         </span>
         <Badge variant="outline" className="muted-badge">
@@ -166,7 +166,6 @@ export function SignUpForm() {
           </p>
         </div>
         <div className="auth-step second-step">
-          <span className="step-number">02</span>
           <div>
             <h3>Next: verify your email</h3>
             <p>We’ll send Firebase’s verification link after sign-up.</p>
