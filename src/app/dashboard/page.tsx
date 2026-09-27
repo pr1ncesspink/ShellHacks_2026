@@ -4,11 +4,11 @@ import {
 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
 import {
-  MapPlaceholder,
   PageHeading,
   WorkspaceFooter,
 } from "@/components/workspace";
 import { FileUpload } from "@/components/file-upload";
+import { ProjectMap } from "@/components/project-map";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getDashboardData } from "@/lib/backend";
@@ -39,11 +39,14 @@ export default async function DashboardPage() {
       <SiteHeader active="dashboard" user={user} />
       <main id="main-content" className="workspace">
         <PageHeading />
+        <section className="upload-section upload-section-first" aria-label="Construction plans">
+          <FileUpload />
+        </section>
         <div className={`data-banner ${failed ? "error-banner" : ""}`}>
           <span>
             <Info size={15} aria-hidden="true" />
             {data.mode === "example"
-              ? "You’re viewing example project data. Connect your backend to see live results."
+              ? "Overlap statistics use example data. The map shows locations from your project CSV."
               : failed
                 ? "We couldn’t load project data. Check your backend connection and try again."
                 : "Live project data from your connected backend."}
@@ -133,11 +136,8 @@ export default async function DashboardPage() {
               </p>
             </Card>
           </section>
-          <MapPlaceholder />
+          <ProjectMap />
         </div>
-        <section className="upload-section" aria-label="Construction plans">
-          <FileUpload />
-        </section>
         <WorkspaceFooter />
       </main>
     </>

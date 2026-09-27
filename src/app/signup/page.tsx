@@ -52,7 +52,83 @@ export default async function SignupPage() {
             </div>
           </div>
         </section>
+<<<<<<< HEAD
         <SignUpForm />
+=======
+        <Card className="login-card panel">
+          <div className="login-card-top">
+            <span className="icon-tile violet">
+              <UserPlus size={23} aria-hidden="true" />
+            </span>
+            <Badge variant="outline" className="muted-badge">
+              SIGNUP PREVIEW
+            </Badge>
+          </div>
+          <h2>Create your account.</h2>
+          <p>Your future home for connected project planning.</p>
+          <div className="auth-fields">
+            <label htmlFor="signup-name">Full name</label>
+            <Input
+              id="signup-name"
+              name="name"
+              autoComplete="name"
+              placeholder="Your full name…"
+              disabled
+            />
+            <label htmlFor="signup-email">Work email</label>
+            <Input
+              id="signup-email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@company.com…"
+              disabled
+            />
+            <label htmlFor="signup-organization">Organization (optional)</label>
+            <Input
+              id="signup-organization"
+              name="organization"
+              autoComplete="organization"
+              placeholder="Your company or team…"
+              disabled
+            />
+            <label htmlFor="signup-password">Password</label>
+            <Input
+              id="signup-password"
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="Create a password…"
+              disabled
+            />
+          </div>
+          <div className="auth-step second-step">
+            <div>
+              <h3>Next: verify your identity</h3>
+              <p>Email verification and authenticator setup.</p>
+            </div>
+            <ShieldCheck size={17} aria-hidden="true" />
+          </div>
+          <div className="auth-notice">
+            <LockKeyhole size={14} aria-hidden="true" />
+            <span>
+              Design preview only. No account is created and no personal
+              information is collected.
+            </span>
+          </div>
+          <Button disabled className="signup-disabled">
+            Create account <ArrowRight size={16} aria-hidden="true" />
+          </Button>
+          <Button asChild variant="outline" className="profile-preview-button">
+            <Link href="/profile">
+              Preview your profile <ArrowRight size={16} aria-hidden="true" />
+            </Link>
+          </Button>
+          <p className="account-switch">
+            Already have an account? <Link href="/">Sign in</Link>
+          </p>
+        </Card>
+>>>>>>> 96cc8833180f88b8b0c2e590dad55eb8e28f0d10
       </main>
       <footer className="login-footer">
         <span>GridLens / Built for better coordination.</span>
