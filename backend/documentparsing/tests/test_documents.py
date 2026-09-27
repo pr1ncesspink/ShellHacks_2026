@@ -20,7 +20,7 @@ from openpyxl import Workbook
 
 from backend.documentparsing.config import SnowflakeSettings
 from backend.documentparsing.extraction import (
-    COLUMNS, DOCUMENT_TYPES, Project, chunks, deduplicate, extract_document,
+    CHUNK_CHARS, COLUMNS, DOCUMENT_TYPES, Project, RESPONSE_FORMAT, chunks, deduplicate, extract_document,
     extraction_rows, normalize_project, parsed_pages, validate_document,
 )
 from backend.documentparsing.pipeline import OUTPUTS, build_workbook, run_pipeline
@@ -84,6 +84,11 @@ def input_bytes(suffix):
             ".jpg": b"\xff\xd8\xfffixture", ".jpeg": b"\xff\xd8\xfffixture",
             ".tif": b"II\x2a\x00fixture", ".tiff": b"MM\x00\x2afixture",
             ".html": b"<html>Construction plan</html>", ".txt": b"Construction plan"}[suffix]
+
+
+def overlaps_pages():
+    fixture = Path(__file__).parent / "fixtures" / "projects_overlaps_pages.json"
+    return json.loads(fixture.read_text(encoding="utf-8"))
 
 
 def seed_workbook(path):
@@ -194,6 +199,92 @@ class DocumentTests(unittest.TestCase):
             self.assertNotIn("secret", json.dumps(report))
             self.assertEqual(len(projects), 1)
             self.assertEqual(report["skipped_pages"], [{"page": 3, "reason": "ceii"}])
+
+    def test_short_document_is_extracted_as_one_unit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.pdf"
+            path.write_bytes(input_bytes(".pdf"))
+            pages = overlaps_pages()
+            self.assertEqual(len(pages), 5)
+            provider = FakeCortex(pages=pages)
+
+            projects, report = extract_document(path, provider)
+
+        calls = [value for operation, value in provider.calls if operation == "extract"]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual([f"[Source page {page}]" in calls[0] for page in range(1, 6)], [True] * 5)
+        self.assertLessEqual(len(calls[0]), CHUNK_CHARS)
+        self.assertIn("project_id_a", calls[0])
+        self.assertIn("project_name_b", calls[0])
+        self.assertEqual(len(projects), 1)
+        self.assertEqual(len(report["extractions"]), 1)
+        self.assertEqual(report["extractions"][0]["source"]["page"], 1)
+        self.assertEqual(report["extractions"][0]["source"]["page_end"], 5)
+
+    def test_long_document_keeps_adjacent_page_windows(self):
+        # Three 4k pages exceed the whole-document limit, while each adjacent
+        # pair fits one chunk and therefore gives one extract call per page.
+        pages = [f"Unique page {page} " + (str(page) * 4000) for page in range(1, 4)]
+        self.assertGreater(sum(map(len, pages)), CHUNK_CHARS)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.pdf"
+            path.write_bytes(input_bytes(".pdf"))
+            provider = FakeCortex(pages=pages)
+            _, report = extract_document(path, provider)
+
+        calls = [value for operation, value in provider.calls if operation == "extract"]
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(len(value) <= CHUNK_CHARS for value in calls))
+        self.assertIn("Unique page 2", calls[0])
+        self.assertNotIn("Unique page 3", calls[0])
+        self.assertIn("Unique page 3", calls[1])
+        self.assertEqual([(item["source"]["page"], item["source"]["page_end"])
+                          for item in report["extractions"]], [(1, 2), (2, 3), (3, 3)])
+
+    def test_short_document_does_not_bridge_skipped_pages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.pdf"
+            path.write_bytes(input_bytes(".pdf"))
+            provider = FakeCortex(pages=["Segment one", "CONFIDENTIAL CEII secret", "Segment three"])
+            _, report = extract_document(path, provider)
+
+        calls = [value for operation, value in provider.calls if operation == "extract"]
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(any("secret" in text for text in calls))
+        self.assertFalse(any("Segment one" in text and "Segment three" in text for text in calls))
+        self.assertEqual([(item["source"]["page"], item["source"]["page_end"])
+                          for item in report["extractions"]], [(1, 1), (3, 3)])
+
+    def test_long_document_windows_stop_before_ceii_page(self):
+        pages = ["Unique page 1 " + "1" * 6000, "CONFIDENTIAL CEII secret", "Unique page 3 " + "3" * 6000]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.pdf"
+            path.write_bytes(input_bytes(".pdf"))
+            provider = FakeCortex(pages=pages)
+            _, report = extract_document(path, provider)
+
+        calls = [value for operation, value in provider.calls if operation == "extract"]
+        self.assertFalse(any("secret" in text for text in calls))
+        self.assertEqual([(item["source"]["page"], item["source"]["page_end"])
+                          for item in report["extractions"]], [(1, 1), (3, 3)])
+
+    def test_no_eligible_pages_makes_no_extract_calls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.pdf"
+            path.write_bytes(input_bytes(".pdf"))
+            provider = FakeCortex(pages=["Project one", "Project two"])
+            projects, _ = extract_document(path, provider, audit_only=True)
+
+        self.assertEqual([op for op, _ in provider.calls if op == "extract"], [])
+        self.assertEqual(projects, [])
+
+    def test_response_format_describes_column_split_tables(self):
+        description = RESPONSE_FORMAT["schema"]["properties"]["projects"]["description"]
+        self.assertIn("Keep every column aligned to the same project rows.", description)
+        self.assertIn("A table may be split column-wise across pages", description)
+        self.assertIn("the Nth row of each page segment belongs to the same record", description)
+        self.assertIn("When one record lists several projects", description)
+        self.assertIn("output each as its own row", description)
 
     def test_duplicate_ids_cannot_merge_different_utilities(self):
         a = normalize_project(row(), REFERENCE, "page 1")

@@ -131,6 +131,104 @@ def test_cortex_to_persistence_and_semantic_payload(tmp_path, fake_encoder):
     assert "crane mobilization" in fake_encoder.calls[0][0]
 
 
+def test_pdf_upload_end_to_end_contracts(tmp_path, fake_encoder):
+    from backend.documentparsing.extraction import Project
+    from backend.documentparsing.tests.test_documents import FakeCortex, input_bytes, overlaps_pages, row
+
+    fixture_pages = overlaps_pages()
+    names = [
+        "Hooks - Thurmond 115 kV Tie: Rebuild",
+        "Jasper - Okatie 230 kV #2: Construct",
+        "Stevens Creek - Hooks 115 kV / LR Plumb Branch 46 kV Rebuilds",
+        "Okatie-Bluffton 115 kV: Rebuild",
+        "EVANS PRIMARY - THURMOND DAM (USA) #5 115KV REBUILD",
+        "SAV: MCINTOSH - PURRYSBURG 230KV REACTORS",
+        "SAV: GOSHEN (SAV) - MCINTOSH 115KV LINE REBUILD",
+    ]
+    assert all(name in "\n".join(fixture_pages) for name in names)
+    pages = fixture_pages.copy()
+    coordinate_annotation = (
+        "\n[Synthetic coordinate annotation for this test; absent from the source PDF]\n"
+        f"project_name: {names[0]}\nlatitude: 33.0\nlongitude: -81.0"
+    )
+    pages[0] += coordinate_annotation
+    rows = [row(project_name=name, published_project_id="",
+                utility="Dominion Energy South Carolina" if index < 4 else "Georgia Power",
+                state="", description="", line_length_mi="", in_service_date="",
+                latitude="33.0" if index == 0 else "",
+                longitude="-81.0" if index == 0 else "",
+                voltages_kv="", total_cost="", cost_unit="")
+            for index, name in enumerate(names)]
+
+    class RecordingStore(MemoryStore):
+        def __init__(self):
+            super().__init__()
+            self.save_calls = []
+
+        def save_upload(self, upload_id, points, result, audit):
+            self.save_calls.append((upload_id, points, result, audit))
+            return super().save_upload(upload_id, points, result, audit)
+
+    path = tmp_path / "plan.pdf"
+    path.write_bytes(input_bytes(".pdf"))
+    provider = FakeCortex(pages=pages, rows=rows)
+    store = RecordingStore()
+
+    result = process_plan(path, store, provider)
+
+    assert [call[0] for call in provider.calls] == ["upload", "parse", "extract"]
+    assert coordinate_annotation in provider.calls[2][1]
+    assert len(store.save_calls) == 1
+    upload_id, points, collision_result, audit = store.save_calls[0]
+    assert upload_id == result["upload_id"]
+    assert len(points) == 7
+    assert len({point.project_id for point in points}) == 7
+    normalized_names = names[:4] + [name.replace("KV", " kV") for name in names[4:]]
+    assert {point.source["project_name"] for point in points} == set(normalized_names)
+    assert all(Project.model_validate(point.source).project_id == point.project_id for point in points)
+    assert all(point.source["source_references"][0]["page_end"] == 5 for point in points)
+    assert audit["project_count"] == 7
+
+    collision_keys = {
+        "schema_version", "upload_id", "reference_dataset_id", "radius_miles",
+        "distance_metric", "boundary", "schedule_filter_applied", "owner_filter_applied",
+        "excluded_upload_records", "excluded_reference_records", "collisions",
+    }
+    assert set(collision_result) == collision_keys
+    assert collision_keys <= set(result)
+    assert result["schema_version"] == "collisions-v1"
+    assert result["reference_dataset_id"] == "REF"
+    assert result["radius_miles"] == 25.0
+    assert result["distance_metric"] == "haversine"
+    assert result["boundary"] == "inclusive"
+    assert result["collision_count"] == 1
+    assert result["point_count"] == 7
+    unresolved = {point.record_id for point in points if point.latitude is None}
+    assert len(unresolved) == 6
+    assert all(record_id.endswith(":unresolved") for record_id in unresolved)
+    assert set(result["excluded_upload_records"]) == unresolved
+    assert len(result["collisions"]) == 1
+    collision = result["collisions"][0]
+    assert collision["overlap_id"].startswith("COL_")
+    assert collision["distance_mi"] == pytest.approx(0.0)
+    assert collision["time_gap_days"] is None
+    assert collision["timing_basis"] == "unknown_exact_dates"
+    assert collision["classification"] == "geographic_candidate"
+    assert collision["uploaded_project"]["record_id"].endswith(":point")
+    assert collision["reference_project"]["record_id"] == "reference"
+    assert not unresolved.intersection({row["uploaded_project"]["record_id"]
+                                        for row in result["collisions"]})
+
+    stored_page = store.collisions(upload_id)
+    assert stored_page["collisions"] == result["collisions"]
+    scored_page = score_collision_page(stored_page, fake_encoder)
+    assert len(scored_page["collisions"]) == len(stored_page["collisions"])
+    assert all(-1 <= row["semantic_similarity"] <= 1 for row in scored_page["collisions"])
+    assert [row["distance_mi"] for row in scored_page["collisions"]] == [
+        row["distance_mi"] for row in stored_page["collisions"]]
+    assert all("semantic_similarity" not in row for row in stored_page["collisions"])
+
+
 def test_upload_json_endpoint_and_get_are_scoped(fake_encoder):
     from backend.app.api.routes.projects import get_project_store
     from backend.app.main import create_app
