@@ -62,6 +62,8 @@ export function safeNext(value: string | null | undefined): string {
     if (target.origin !== base.origin || !target.pathname.startsWith("/")) {
       return DEFAULT_NEXT;
     }
+    // In-progress upload links are short-lived; never resume one after signing in.
+    if (target.searchParams.has("sessions")) return DEFAULT_NEXT;
   } catch {
     return DEFAULT_NEXT;
   }

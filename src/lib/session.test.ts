@@ -17,6 +17,13 @@ test("isSecureRequest follows the request protocol", () => {
 test("safeNext accepts same-origin relative paths", () => {
   assert.equal(safeNext("/dashboard"), "/dashboard");
   assert.equal(safeNext("/profile?x=1"), "/profile?x=1");
+  assert.equal(safeNext("/budget?uploads=UPL_0123456789abcdef0123456789abcdef"),
+    "/budget?uploads=UPL_0123456789abcdef0123456789abcdef");
+});
+
+test("safeNext never resumes an in-progress upload link after sign-in", () => {
+  assert.equal(safeNext("/budget?sessions=SES_0123456789abcdef0123456789abcdef"), "/dashboard");
+  assert.equal(safeNext("/budget?project=R-0001&sessions=SES_x"), "/dashboard");
 });
 
 test("safeNext rejects external, encoded, malformed, and control-character targets", () => {
