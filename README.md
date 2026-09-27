@@ -1,5 +1,7 @@
 # CollideAverse
 
+![CollideAverse: two galaxies colliding](docs/assets/collideaverse-banner.jpg)
+
 CollideAverse checks a new construction project against known projects before it
 breaks ground. Upload a plan (PDF or CSV) and CollideAverse extracts the projects,
 places them on a map, finds every known project within 25 miles, and writes a
