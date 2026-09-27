@@ -1,58 +1,57 @@
-# GridLens
+# CollideAverse
 
-Next.js App Router + TypeScript + shadcn/ui frontend with a separate FastAPI backend hosted on Google Cloud Run.
+CollideAverse checks a new construction project against known projects before it
+breaks ground. Upload a plan (PDF or CSV) and CollideAverse extracts the projects,
+places them on a map, finds every known project within 25 miles, and writes a
+Gemini summary of what it found — so you can see what a new project would
+collide with and plan around it.
 
-The frontend supports verified Firebase accounts and can either show labeled
-example data or connect server-side to the private Cloud Run backend. Example
-mode does not require Python, Cloud Run credentials, or a running backend.
+## How it works
 
-## Frontend
+1. **Upload** on the Budget page (`/budget`): up to 5 files — PDF up to 50 MB or
+   CSV up to 10 MB. The browser uploads straight to Cloud Storage with a
+   short-lived signed URL; the file never passes through the web server.
+2. **Process** in a Cloud Run Job, with live progress on the page:
+   Checking → Preparing → Uploading → Queued → Staging → Parsing → Extracting →
+   Locating → Matching → Saving → Summarizing → Done (CSV skips the document steps).
+   - PDFs are parsed by Snowflake Cortex (`AI_PARSE_DOCUMENT`, `AI_EXTRACT`).
+   - CSVs are imported directly and must include `project_id`, `project_name`
+     and `utility` columns (`latitude`/`longitude` let projects appear on the map).
+3. **Match**: a haversine BallTree finds every reference project within 25 miles
+   of each located upload point. Results are stored in Snowflake.
+4. **Summarize**: Gemini on Vertex AI (deployed as `gemini-3.1-flash-lite` via
+   `DIAGNOSIS_MODEL`) writes a summary —
+   key projects, collision hotspots, timing notes and data gaps. If Gemini is
+   unavailable, a deterministic rules-based summary is shown instead.
+5. **See it**: the map zooms to where the upload collides, draws each nearby pair,
+   and lists them in a table. The summary sits beside it.
 
-### Local design preview (no sign-in)
+An upload can be **cancelled** until it finishes; this stops the browser upload,
+skips the summary, and (best effort) stops the Cloud Run job and deletes the stored file.
 
-To edit the frontend without Firebase setup, add `GRIDLENS_LOCAL_PREVIEW=1`
-to your ignored `.env.local`, then run `npm run dev` and open
-`http://127.0.0.1:5173/dashboard`. This opt-in works only in development on a
-loopback address. It shows a preview account and example similarity data,
-while the map uses the bundled project dataset. To read real local similarity
-results, set `BACKEND_URL=http://127.0.0.1:8002` and `BACKEND_AUTH=none`.
-Preview mode only allows a loopback backend and sends no authenticated user
-header. It does not connect to Cloud Run. Public hostnames and production
-builds still require real sign-in. Remove the setting to test Firebase locally.
+Collisions are planning candidates based on point proximity, not proof of
+physical overlap or a construction schedule.
 
-### Real sign-in
+## Architecture
 
-The Budget Summary schedule planner posts its displayed locations to `/api/map-analysis`, which forwards
-them to the backend's `/projects/map-analysis` endpoint. This uses the existing
-Haversine BallTree matcher across the full map dataset. Pairs must be within
-25 miles and 365 days when both dates are exact; year-only records must share
-the same published year. Unknown schedules are reported separately and never
-highlighted as confirmed matches. These are planning candidates, not proof of
-physical overlap. The legacy six-pair similarity dataset is not used by the map.
+| Part | Where | Notes |
+| --- | --- | --- |
+| Web app | Next.js 16 (App Router), TypeScript, Tailwind v4, shadcn/ui — Vercel | Firebase email/password sign-in with verified email |
+| API | FastAPI on private Cloud Run (`shellhacks-api`, project `shellhacks-2026`) | Called only server-side by Next.js via Google OIDC |
+| Processing | Cloud Run Job `shellhacks-upload-job` | Same image as the API |
+| Uploads | Cloud Storage `gs://shellhacks-2026-plan-uploads` | Signed PUT URLs; files deleted after processing |
+| Data | Snowflake (`GRIDLOCK_REFERENCE`, `GRIDLOCK_UPLOADS`) | Reference projects, uploads, collisions, summaries |
+| AI | Snowflake Cortex (documents), Vertex AI Gemini (summaries), MiniLM (name similarity) | |
 
-For local map development, run the backend from the repository root:
+Firebase Auth lives in a separate project (`shellhacks26-c78d4`); never mix the two
+project IDs.
 
-```powershell
-backend\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8002
-```
+Pages: `/` (sign-in), `/signup`, `/verify-email`, `/dashboard` (overview and
+reference map), `/budget` (upload, pipeline, collision map and summary), `/profile`. Old `/summary` links redirect to `/budget`.
 
-The matching endpoint needs the optional dependencies in
-`backend/requirements-projectdata.txt`. It does not require Snowflake credentials
-or an AI model; it analyzes the supplied coordinates and schedules without
-persisting them. Reviewed PDF records go through the same matching endpoint.
-PDF text extraction still happens locally in the browser.
+## Run locally
 
-The schedule planner on `/budget` offers Current plan and Proposed plan views in the same
-map. Before generating a proposal, choose the overlap window and maximum moves
-earlier/later (calendar years or exact-date days). Limits apply to every project;
-all records of one project move together. Unknown schedules stay unchanged.
-Calendar-year mode compares published years, while day mode requires full ISO
-dates. The backend uses a bounded deterministic search to reduce matching pairs;
-it is not an AI recommendation or proof of a feasible/optimal construction plan.
-Original data is preserved, proposals remain in browser memory, and the review
-list shows every proposed schedule change and remaining matches.
-
-Use Node.js 24 LTS. From the repository root:
+Node.js 24 LTS is recommended. From the repository root:
 
 ```powershell
 npm ci
@@ -60,127 +59,58 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
-Fill the Firebase values in `.env.local` from the Web app in your Firebase
-project (it may be separate from the Cloud Run project), then enable
-Email/Password in Firebase Authentication. Open
-http://127.0.0.1:5173. Anyone can create an account at `/signup`; Firebase sends
-an email verification link, and `/dashboard`, `/budget`, and `/profile` stay
-server-protected until the address is verified. The profile displays the real
-Firebase name and email while organization, role, and budget analysis stay
-labeled as previews.
+Open http://127.0.0.1:5173. Fill the Firebase values in `.env.local` from your
+Firebase web app and enable Email/Password sign-in.
 
-Keep `BACKEND_URL` empty to use the explicitly labeled example dashboard:
+- **Design preview (no sign-in):** add `GRIDLENS_LOCAL_PREVIEW=1` to `.env.local`
+  (development on loopback only).
+- **Example data:** leave `BACKEND_URL` empty; the dashboard shows labeled example data.
+- **Local backend:** set `BACKEND_URL=http://127.0.0.1:8000` and `BACKEND_AUTH=none`,
+  then start the API (below).
 
-```dotenv
-BACKEND_URL=
-BACKEND_AUTH=none
-```
-
-With this setting empty, the dashboard makes no backend request. The displayed
-project counts and similarity scores are illustrative. To use local uvicorn,
-start the backend as described below and set:
-
-```dotenv
-BACKEND_URL=http://127.0.0.1:8000
-BACKEND_AUTH=none
-```
-
-File selection accepts up to five PDF/PNG/JPG files, 20 MB each. Files stay in browser memory, are cleared when leaving the page, and are not uploaded or processed. The dashboard map shows a static reference dataset of project locations; budget analysis intentionally remains a placeholder.
-
-For production:
-
-```powershell
-npm run build
-npm start
-```
-
-The production server listens on http://127.0.0.1:4173. Deploy the frontend to
-a host that supports a Next.js server; it is not a static export. `npm run
-preview` is an alias for `npm start`. Private Cloud Run access uses Vercel OIDC,
-Google Workload Identity Federation, and service-account impersonation without
-a stored Google key. See [Firebase and Vercel setup](docs/FIREBASE_VERCEL_SETUP.md)
-for the complete human-run configuration.
-
-## Run the backend locally (optional)
-
-This is a separate backend development workflow and is not required for the frontend preview. Install Python (the backend is tested here with Python 3.14) first. From the project root, set up the backend in PowerShell once:
+### Backend
 
 ```powershell
 python -m venv backend/.venv
 .\backend\.venv\Scripts\Activate.ps1
-python -m ensurepip --upgrade
 python -m pip install uv
 uv --no-cache --system-certs pip install --index-strategy unsafe-best-match -r backend/requirements.txt
-```
-
-The requirements use both PyPI and the official PyTorch CPU index. The index flag allows uv to resolve pinned packages across those two indexes.
-
-Start the backend in that terminal:
-
-```powershell
-.\backend\.venv\Scripts\Activate.ps1
-Remove-Item Env:HF_HUB_OFFLINE -ErrorAction SilentlyContinue
-Remove-Item Env:TRANSFORMERS_OFFLINE -ErrorAction SilentlyContinue
 python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-You can work on this API independently. Leave the frontend's `BACKEND_URL` empty to keep the website in preview mode.
+Snowflake, upload and summary features need the extra dependencies and settings in
+[backend/projectdata/README.md](backend/projectdata/README.md) (Snowflake env file,
+`scripts/snowflake.ps1`, upload bucket and job, local Google credentials that
+impersonate the runtime service account, and bucket CORS for your local origin).
 
-The first scores request downloads the pinned sentence-transformer model from Hugging Face and may take longer. Internet access and valid TLS certificates are required for that download. The model is then cached locally.
-
-After a successful first request, you can optionally set `$env:HF_HUB_OFFLINE = '1'` before starting the backend to use the cached model without contacting Hugging Face. This only affects the similarity model; live Gemini agent calls still require network access and credentials. The Docker image downloads its model during the build, so its existing offline settings are intentional.
-
-## Backend development and agents
-
-For tests and development CLI tools, install the development requirements in the same activated environment. This file also includes the runtime dependencies:
+## Tests
 
 ```powershell
-uv --no-cache --system-certs pip install --index-strategy unsafe-best-match -r backend/requirements-dev.txt
-python -m pytest backend/tests -m "not model and not gemini"
-```
-
-Google ADK, Google GenAI, and A2A dependencies remain included in the runtime requirements. See [the agent setup instructions](backend/app/agents/README.md) for credentials and `adk web`. The FastAPI A2A endpoint is opt-in through `ENABLE_A2A=1`. The frontend preview does not call these services.
-
-Scores are cosine similarities in the range -1 to 1, not percentages or probabilities. The current backend implements semantic similarity; it does not expose a named entity recognition (NER) endpoint.
-
-## Document ingestion (Snowflake)
-
-Document ingestion uses Snowflake Cortex. See [setup, supported formats and JSON outputs](backend/documentparsing/README.md).
-
-The canonical pipeline is `python -m backend.documentparsing`. It sends documents through Snowflake `AI_PARSE_DOCUMENT` and `AI_EXTRACT`, validates project records, and exports structured JSON for the existing overlap and similarity workflow.
-
-The previous `python -m backend.pdfparsing` command and Python `run(args)` entry point forward to that pipeline; the local PDF extraction implementation has been removed. Use the dedicated `.venv-documents` environment described in the ingestion documentation.
-
-The frontend file picker is not connected to this pipeline. Selecting a file does not send it to Snowflake or Cloud Run.
-
-## Private backend integration
-
-The dashboard server calls `GET /overlaps/similarity`. With
-`BACKEND_AUTH=google-oidc`, it mints a Google ID token for the Cloud Run origin
-through Vercel OIDC and Workload Identity Federation, then forwards the verified
-Firebase uid in `X-Authenticated-User`. The browser receives neither the Cloud
-Run URL nor a Google credential. Cloud Run remains private.
-
-An unavailable backend or invalid configuration shows dashboard error mode
-instead of substituting example rows. Use `BACKEND_AUTH=none` only for local
-uvicorn. Production and preview setup, IAM bindings, environment variables, and
-smoke tests are in [the setup runbook](docs/FIREBASE_VERCEL_SETUP.md).
-
-## Validation and deployment
-
-### Gemini planning responses
-
-The budget page's Generate summary button sends the question and selected project to the server-only `/api/budget-response` route. Generate proposal first runs the existing schedule analysis, then asks Gemini to explain the computed counts, preferences, and up to 50 schedule changes. The planner still analyzes the full dataset; selecting a map point does not limit its scope. Gemini does not apply changes or produce verified cost estimates.
-
-Set `GEMINI_API_KEY` in the ignored `.env.local` file (or the frontend hosting environment), then restart Next.js. `GOOGLE_API_KEY` is also supported. Optionally set `GEMINI_MODEL`; it defaults to `gemini-flash-latest`. Never prefix these secrets with `NEXT_PUBLIC_` or commit them. Requests use Google's [generateContent API](https://ai.google.dev/api/generate-content) directly, independently of the Python ADK diagnosis agents. Without a key, the response panel displays a configuration error rather than example AI output. Production requires sign-in; the existing development-only local preview is supported. Requests are limited to 25 per minute per server instance, with provider quotas applying separately.
-
-```powershell
-npm run lint
 npm test
-npm run build
+npm run lint
 npm run typecheck
+npm run build
+python -m pytest backend/tests backend/documentparsing/tests -m "not model and not gemini"
 ```
 
-The frontend migration leaves the Python backend and its requirements unchanged. Tests cover response validation, the backend time-gap alias, negative cosine scores, unique project counts, similarity-band boundaries, and empty results.
+## Deploy
 
-Design guidance: [Vercel React best practices](https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices), [Vercel Web Interface Guidelines](https://github.com/vercel-labs/web-interface-guidelines), and [shadcn/ui](https://ui.shadcn.com/docs/installation/next). UI components are generated from the official shadcn registry and customized to the GridLens palette.
+Deploy in this order so the website never calls a backend that lacks its routes:
+
+1. Snowflake setup (creates tables): `powershell -ExecutionPolicy Bypass -File scripts/snowflake.ps1 setup`
+2. Backend: `bash backend/deploy/cloudrun.sh --dry-run deploy`, then `bash backend/deploy/cloudrun.sh deploy`
+3. Upload job image (the job also needs the Vertex/`DIAGNOSIS_MODEL` env vars set once; see
+   [backend/projectdata/README.md](backend/projectdata/README.md)): `gcloud --configuration=shellhacks --project=shellhacks-2026 run jobs update shellhacks-upload-job --region=us-east1 --image=us-east1-docker.pkg.dev/shellhacks-2026/shellhacks/shellhacks-api:<TAG>`
+4. Frontend: merge to `main`; Vercel deploys the production site.
+
+Setup details: [Cloud Run runtime secrets and Gemini](backend/deploy/OWNER_SETUP.md),
+[Firebase and Vercel](docs/FIREBASE_VERCEL_SETUP.md), and
+[uploads, summaries and cancel](backend/projectdata/README.md). Always pass
+`--configuration=shellhacks` to `gcloud`, and quote comma-separated flag values in
+PowerShell (`'--update-env-vars=A=1,B=2'`).
+
+## More documentation
+
+- [Document ingestion (Snowflake Cortex)](backend/documentparsing/README.md)
+- [Project data, uploads, collisions and summaries](backend/projectdata/README.md)
+- [Agents (ADK, A2A)](backend/app/agents/README.md)
