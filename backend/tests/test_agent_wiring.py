@@ -25,6 +25,7 @@ def test_root_agent_import_needs_no_credentials(monkeypatch):
         "score_project_names",
         "get_overlap",
         "list_overlaps",
+        "get_upload_collisions",
     }
 
 

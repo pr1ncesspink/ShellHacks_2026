@@ -112,7 +112,7 @@ def build_workbook(projects: list[dict], overlaps: list[dict]) -> dict:
 
 def run_pipeline(inputs, output_dir, *, starter_workbook=None, utility="", state="", client=None,
                  cache_dir=".cache/geocoding", osm_snapshot=None, refresh_locations=False,
-                 user_agent="", audit_inputs=()):
+                 user_agent="", audit_inputs=(), compute_overlaps=True):
     paths = list(dict.fromkeys(Path(path).resolve() for path in inputs))
     audits = [Path(path).resolve() for path in audit_inputs]
     seed_path = Path(starter_workbook).resolve() if starter_workbook else None
@@ -163,9 +163,10 @@ def run_pipeline(inputs, output_dir, *, starter_workbook=None, utility="", state
     for project in projects:
         project["lat_center"], project["lon_center"] = center(project)
     comparable = [p for p in projects if p.get("utility")]
-    rows, excluded = collisions(comparable)
-    excluded.extend({"project_id": p["project_id"], "reason": "missing_utility"}
-                    for p in projects if not p.get("utility"))
+    rows, excluded = collisions(comparable) if compute_overlaps else ([], [])
+    if compute_overlaps:
+        excluded.extend({"project_id": p["project_id"], "reason": "missing_utility"}
+                        for p in projects if not p.get("utility"))
     for row in rows:
         pair = tuple(sorted((row["project_id_a"], row["project_id_b"])))
         row["overlap_id"] = known_ids.get(pair) or "OVL_" + hashlib.sha256("|".join(pair).encode()).hexdigest()[:20]
@@ -176,7 +177,8 @@ def run_pipeline(inputs, output_dir, *, starter_workbook=None, utility="", state
              "eligible_overlap_ids": [row["overlap_id"] for row in rows if row["time_gap (day)"] <= 365],
              "collision_exclusions": excluded, "geocoding": resolver.stats,
              "rules": {"distance_miles_exclusive": 25, "max_in_service_gap_days_inclusive": 365,
-                       "timing_basis": "in_service_date_proxy", "overlaps_export": "all_geographic_candidates"},
+                       "timing_basis": "in_service_date_proxy",
+                       "overlaps_export": "all_geographic_candidates" if compute_overlaps else "deferred_to_projectdata"},
              "warnings": [{"project_id": p["project_id"], "warnings": p["warnings"]} for p in projects if p["warnings"]],
              "attribution": "OSM-derived matches: © OpenStreetMap contributors, https://www.openstreetmap.org/copyright"}
     artifacts = {"projects.json": projects, "overlaps.json": rows, "workbook.json": workbook,

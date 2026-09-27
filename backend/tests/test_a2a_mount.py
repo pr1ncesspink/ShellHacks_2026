@@ -69,7 +69,7 @@ def test_a2a_agent_card_is_available_when_enabled(monkeypatch):
     payload = response.json()
     assert payload["name"] == "overlap_agent"
     assert payload["url"].endswith("/a2a")
-    assert len(payload["skills"]) == 3
+    assert len(payload["skills"]) == 4
 
 
 def test_agent_env_is_excluded_and_untracked():
