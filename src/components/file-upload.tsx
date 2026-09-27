@@ -7,41 +7,59 @@ import {
   useReducer,
   useRef,
   useState,
+  type ActionDispatch,
   type DragEvent,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
-import { CircleAlert, FileSpreadsheet, FileText, Info, Upload, X } from "lucide-react";
+import { CircleAlert, FileSpreadsheet, FileText, Info, LoaderCircle, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { UploadStepper } from "@/components/upload-stepper";
-import { isUploadCancelled, runUploadSession, type UploadKind } from "@/lib/upload-sessions";
-import { uploadFailureMessage, uploadStepAnnouncement } from "@/lib/upload-progress";
+import {
+  GENERIC_API_ERROR,
+  cancelUploadSession,
+  isTerminalStatus,
+  isUploadCancelled,
+  pollUploadSession,
+  runUploadSession,
+  sessionProgress,
+  type UploadKind,
+} from "@/lib/upload-sessions";
+import { uploadFailureMessage } from "@/lib/upload-progress";
 import {
   UPLOAD_ACCEPT,
-  batchSummaryHref,
   classifyFiles,
   formatBytes,
   isFinished,
+  listedFiles,
+  queuedSessionIds,
   rejectionMessage,
+  resumedUploadItems,
+  succeededUploadIds,
+  uploadActivity,
+  uploadItemAnnouncement,
+  type UploadActivity,
   uploadListReducer,
   type Rejection,
   type UploadItem,
+  type UploadListAction,
 } from "@/lib/plan-upload";
 import "./plan-upload.css";
 
 type Item = UploadItem<File>;
+type Dispatch = ActionDispatch<[action: UploadListAction<File>]>;
 
 type PlanUploadContextValue = {
   state: { items: Item[]; rejections: Rejection<File>[]; dragging: boolean };
   actions: {
     addFiles: (files: FileList | readonly File[] | null) => void;
     retry: (id: string) => void;
+    cancel: (id: string) => void;
     remove: (id: string) => void;
     setDragging: (dragging: boolean) => void;
   };
-  meta: { constraintsId: string };
+  meta: { constraintsId: string; inputId: string };
 };
 
 const PlanUploadContext = createContext<PlanUploadContextValue | null>(null);
@@ -59,41 +77,127 @@ function errorDetail(reason: unknown): string {
     : "";
 }
 
+/** Poll a session resumed from the URL until it is terminal (or the row is aborted). */
+async function followSession(
+  id: string,
+  sessionId: string,
+  attempt: number,
+  controllers: Map<string, AbortController>,
+  cancels: Map<string, AbortController>,
+  dispatch: Dispatch,
+) {
+  const controller = new AbortController();
+  controllers.set(id, controller);
+  try {
+    await pollUploadSession(sessionId, {
+      signal: controller.signal,
+      onProgress: (progress) => dispatch({ type: "progress", id, attempt, progress }),
+    });
+    // Terminal on its own: a cancel still retrying is no longer needed.
+    cancels.get(id)?.abort();
+  } catch (reason) {
+    if (isUploadCancelled(reason, controller.signal)) return;
+    dispatch({ type: "error", id, attempt, message: errorDetail(reason) });
+  } finally {
+    if (controllers.get(id) === controller) controllers.delete(id);
+  }
+}
+
+export type PlanUploadProviderProps = {
+  children: ReactNode;
+  /** Sessions to resume on mount (e.g. from /budget?sessions=...); read once. */
+  initialSessionIds?: string[];
+  /**
+   * Session ids of every row handed to the backend, once no accepted row is
+   * still on its way to the queue. Cancelled rows and rows that failed before
+   * queueing are left out. Fires only when the list changes.
+   */
+  onSessionsChange?: (ids: string[]) => void;
+  /** Upload ids of the rows that succeeded so far; fires only when the list changes. */
+  onUploadsChange?: (uploadIds: string[]) => void;
+  /**
+   * Row counts: `rows` is every row, `active` the rows not yet terminal
+   * (checking, preparing, uploading, queued, processing). Fires on mount and
+   * whenever either count changes.
+   */
+  onActivityChange?: (activity: UploadActivity) => void;
+};
+
 /**
- * Upload state and actions. Each accepted file runs its own upload session;
- * once every row has been queued for processing the page moves to /summary
- * and dashboard polling is aborted (the summary page resumes it).
+ * Upload state and actions. Each accepted file runs its own upload session and
+ * stays on this page; the parent owns the URL and is told about queued
+ * sessions and finished uploads through the callbacks.
  */
-export function PlanUploadProvider({ children }: { children: ReactNode }) {
-  const router = useRouter();
+export function PlanUploadProvider({
+  children,
+  initialSessionIds,
+  onSessionsChange,
+  onUploadsChange,
+  onActivityChange,
+}: PlanUploadProviderProps) {
   const constraintsId = useId();
-  const [items, dispatch] = useReducer(uploadListReducer<File>, []);
+  const inputId = useId();
+  const [initialItems] = useState(() => resumedUploadItems<File>(initialSessionIds ?? []));
+  const [items, dispatch] = useReducer(uploadListReducer<File>, initialItems);
   const [rejections, setRejections] = useState<Rejection<File>[]>([]);
   const [dragging, setDragging] = useState(false);
+  /** Upload or polling run per row. */
   const controllers = useRef(new Map<string, AbortController>());
-  const navigated = useRef(false);
+  /** In-flight server cancel per row. */
+  const cancels = useRef(new Map<string, AbortController>());
+  /** Session created for a row that is not queued yet, so a cancel can reach the backend. */
+  const created = useRef(new Map<string, string>());
+  const callbacks = useRef({ onSessionsChange, onUploadsChange, onActivityChange });
+  const sessionsKey = useRef(initialItems.map((item) => item.sessionId).join(","));
+  const uploadsKey = useRef("");
+  const activityKey = useRef("");
 
   useEffect(() => {
-    const active = controllers.current;
+    callbacks.current = { onSessionsChange, onUploadsChange, onActivityChange };
+  });
+
+  useEffect(() => {
+    const runs = controllers.current;
+    const pending = cancels.current;
+    for (const item of initialItems) {
+      if (item.sessionId) void followSession(item.id, item.sessionId, item.attempt, runs, pending, dispatch);
+    }
     return () => {
-      for (const controller of active.values()) controller.abort();
-      active.clear();
+      for (const controller of [...runs.values(), ...pending.values()]) controller.abort();
+      runs.clear();
+      pending.clear();
     };
-  }, []);
+  }, [initialItems]);
 
   useEffect(() => {
-    if (navigated.current) return;
-    const href = batchSummaryHref(items);
-    if (!href) return;
-    navigated.current = true;
+    const sessions = queuedSessionIds(items);
+    if (sessions !== null && sessions.join(",") !== sessionsKey.current) {
+      sessionsKey.current = sessions.join(",");
+      callbacks.current.onSessionsChange?.(sessions);
+    }
+    const uploads = succeededUploadIds(items);
+    if (uploads.join(",") !== uploadsKey.current) {
+      uploadsKey.current = uploads.join(",");
+      callbacks.current.onUploadsChange?.(uploads);
+    }
+    const activity = uploadActivity(items);
+    const key = `${activity.rows}:${activity.active}`;
+    if (key !== activityKey.current) {
+      activityKey.current = key;
+      callbacks.current.onActivityChange?.(activity);
+    }
+  }, [items]);
+
+  function stopRun(id: string) {
+    const controller = controllers.current.get(id);
+    controllers.current.delete(id);
     // Aborts surface as UploadCancelledError, which the rows ignore.
-    for (const controller of controllers.current.values()) controller.abort();
-    controllers.current.clear();
-    router.push(href);
-  }, [items, router]);
+    controller?.abort();
+  }
 
   async function start(id: string, file: File, kind: UploadKind, attempt: number) {
     controllers.current.get(id)?.abort();
+    created.current.delete(id);
     const controller = new AbortController();
     controllers.current.set(id, controller);
     try {
@@ -101,8 +205,11 @@ export function PlanUploadProvider({ children }: { children: ReactNode }) {
         kind,
         signal: controller.signal,
         onProgress: (progress) => dispatch({ type: "progress", id, attempt, progress }),
+        onCreated: (sessionId) => created.current.set(id, sessionId),
         onQueued: (sessionId) => dispatch({ type: "queued", id, attempt, sessionId }),
       });
+      // Terminal on its own: a cancel still retrying is no longer needed.
+      cancels.current.get(id)?.abort();
     } catch (reason) {
       if (isUploadCancelled(reason, controller.signal)) return;
       dispatch({ type: "error", id, attempt, message: errorDetail(reason) });
@@ -112,8 +219,8 @@ export function PlanUploadProvider({ children }: { children: ReactNode }) {
   }
 
   function addFiles(incoming: FileList | readonly File[] | null) {
-    if (!incoming || navigated.current) return;
-    const { accepted, rejected } = classifyFiles(items.map((item) => item.file), Array.from(incoming));
+    if (!incoming) return;
+    const { accepted, rejected } = classifyFiles(listedFiles(items), Array.from(incoming));
     setRejections(rejected);
     if (!accepted.length) return;
     const added = accepted.map(({ file, kind }) => ({ id: crypto.randomUUID(), file, kind }));
@@ -124,21 +231,67 @@ export function PlanUploadProvider({ children }: { children: ReactNode }) {
   function retry(id: string) {
     const item = items.find((entry) => entry.id === id);
     if (!item) return;
+    if (!item.file) {
+      // A resumed row has no File to send again: let the user pick one.
+      document.getElementById(inputId)?.click();
+      return;
+    }
     dispatch({ type: "retry", id });
     void start(id, item.file, item.kind, item.attempt + 1);
   }
 
+  function cancel(id: string) {
+    const item = items.find((entry) => entry.id === id);
+    if (!item || isFinished(item) || item.cancelling) return;
+    const { attempt, kind, sessionId } = item;
+    if (!sessionId) {
+      // Not queued yet: stop the browser side now. A session that already
+      // exists is cancelled in the background so it never starts processing.
+      const createdId = created.current.get(id);
+      created.current.delete(id);
+      stopRun(id);
+      dispatch({ type: "cancelled", id, attempt });
+      if (createdId) void cancelUploadSession(createdId).catch(() => undefined);
+      return;
+    }
+    // Polling keeps running until the cancel is confirmed, so a terminal state
+    // reached meanwhile still shows (and ends Cancelling...).
+    dispatch({ type: "cancelling", id, attempt });
+    const controller = new AbortController();
+    cancels.current.set(id, controller);
+    cancelUploadSession(sessionId, { signal: controller.signal })
+      .then((state) => {
+        if (state.status === "cancelled") {
+          stopRun(id);
+          dispatch({ type: "cancelled", id, attempt });
+        } else if (isTerminalStatus(state.status)) {
+          // It finished before the cancel landed: show how it ended.
+          stopRun(id);
+          dispatch({ type: "progress", id, attempt, progress: sessionProgress(state.status, state, kind) });
+        } else {
+          dispatch({ type: "cancel-failed", id, attempt, message: GENERIC_API_ERROR });
+        }
+      }, (reason: unknown) => {
+        if (isUploadCancelled(reason, controller.signal)) return;
+        dispatch({ type: "cancel-failed", id, attempt, message: errorDetail(reason) || GENERIC_API_ERROR });
+      })
+      .finally(() => {
+        if (cancels.current.get(id) === controller) cancels.current.delete(id);
+      });
+  }
+
   function remove(id: string) {
-    const controller = controllers.current.get(id);
-    controllers.current.delete(id);
-    controller?.abort();
+    stopRun(id);
+    cancels.current.get(id)?.abort();
+    cancels.current.delete(id);
+    created.current.delete(id);
     dispatch({ type: "remove", id });
   }
 
   const value: PlanUploadContextValue = {
     state: { items, rejections, dragging },
-    actions: { addFiles, retry, remove, setDragging },
-    meta: { constraintsId },
+    actions: { addFiles, retry, cancel, remove, setDragging },
+    meta: { constraintsId, inputId },
   };
   return <PlanUploadContext value={value}>{children}</PlanUploadContext>;
 }
@@ -147,8 +300,8 @@ export function PlanUploadProvider({ children }: { children: ReactNode }) {
 export function PlanUploadHeader() {
   return (
     <div data-slot="plan-upload-header" className="plan-upload-header">
-      <h2>Add construction plans</h2>
-      <p>Each file is checked, uploaded and processed. Once every file is queued, you go to its summary.</p>
+      <h2>Upload a project to check for collisions</h2>
+      <p>Each file is checked, uploaded and processed. Its summary and collisions appear on this page when it finishes.</p>
     </div>
   );
 }
@@ -187,6 +340,7 @@ export function PlanUploadDropzone() {
       onDrop={onDrop}
     >
       <input
+        id={meta.inputId}
         type="file"
         name="plans"
         className="sr-only"
@@ -235,50 +389,88 @@ export function PlanUploadRejections() {
   );
 }
 
+/**
+ * Cancel for a running row, Remove for a finished one. One Button element in
+ * both states, so keyboard focus stays put as the row moves from Cancel to
+ * Cancelling... to Remove. While cancelling it is aria-disabled (not
+ * disabled) for the same reason.
+ */
+function PlanUploadItemAction({ item }: { item: Item }) {
+  const { actions } = usePlanUpload();
+  const { name } = item;
+  if (isFinished(item)) {
+    return (
+      <Button variant="ghost" size="icon-touch" aria-label={`Remove ${name}`} onClick={() => actions.remove(item.id)}>
+        <X size={20} aria-hidden="true" />
+      </Button>
+    );
+  }
+  if (item.cancelling) {
+    return (
+      <Button
+        variant="ghost"
+        size="touch"
+        aria-disabled="true"
+        aria-busy="true"
+        aria-label={`Cancelling upload of ${name}`}
+        className="plan-upload-cancelling"
+        onClick={(event) => event.preventDefault()}
+      >
+        <LoaderCircle size={16} aria-hidden="true" className="upload-stepper-spin" />
+        Cancelling...
+      </Button>
+    );
+  }
+  return (
+    <Button variant="ghost" size="touch" aria-label={`Cancel upload of ${name}`} onClick={() => actions.cancel(item.id)}>
+      Cancel
+    </Button>
+  );
+}
+
 /** One upload: name, size, spoken step status, upload bar, stepper, actions. */
 export function PlanUploadItem({ item }: { item: Item }) {
   const { actions } = usePlanUpload();
-  const { file, progress } = item;
-  const finished = isFinished(item);
+  const { file, name, progress } = item;
   const FileIcon = item.kind === "csv" ? FileSpreadsheet : FileText;
   const detail = item.error && item.error !== uploadFailureMessage(progress.errorCode, item.kind) ? item.error : "";
+  const resumed = file === null;
 
   return (
-    <li data-slot="plan-upload-item" data-state={progress.phase} className="plan-upload-item">
+    <li
+      data-slot="plan-upload-item"
+      data-state={progress.phase}
+      data-cancelling={item.cancelling || undefined}
+      className="plan-upload-item"
+    >
       <div className="plan-upload-item-head">
         <FileIcon size={20} aria-hidden="true" />
         <div className="plan-upload-item-meta">
-          <span className="plan-upload-item-name">{file.name}</span>
+          <span className="plan-upload-item-name">{name}</span>
           <span className="plan-upload-item-info">
-            {item.kind.toUpperCase()} · {formatBytes(file.size)}
+            {resumed ? "Resumed from this page's link" : <>{item.kind.toUpperCase()} · {formatBytes(file.size)}</>}
           </span>
-          {/* Announces step changes only; upload % and chunk counts are not live. */}
+          {/* Announces step and cancel changes only; upload % and chunk counts are not live. */}
           <p role="status" aria-live="polite" aria-atomic="true" className="plan-upload-item-status">
-            <span className="sr-only">{file.name}: </span>
-            {uploadStepAnnouncement(progress)}
+            <span className="sr-only">{name}: </span>
+            {uploadItemAnnouncement(item)}
           </p>
+          {progress.phase === "cancelled" && <span className="plan-upload-item-note">Stopped by you</span>}
         </div>
         <div className="plan-upload-item-actions">
-          {finished ? (
-            <Button variant="ghost" size="icon-touch" aria-label={`Remove ${file.name}`} onClick={() => actions.remove(item.id)}>
-              <X size={20} aria-hidden="true" />
-            </Button>
-          ) : (
-            <Button variant="ghost" size="touch" aria-label={`Cancel upload of ${file.name}`} onClick={() => actions.remove(item.id)}>
-              Cancel
-            </Button>
-          )}
+          <PlanUploadItemAction item={item} />
         </div>
       </div>
       {progress.phase === "uploading" && (
-        <Progress value={progress.percent ?? 0} tone="info" aria-label={`Upload progress for ${file.name}`} />
+        <Progress value={progress.percent ?? 0} tone="info" aria-label={`Upload progress for ${name}`} />
       )}
       <UploadStepper
         key={item.attempt}
         progress={progress}
-        label={`Steps for ${file.name}`}
+        label={`Steps for ${name}`}
         onRetry={() => actions.retry(item.id)}
-        retryLabel={`Retry ${file.name}`}
+        retryText={resumed ? "Upload again" : "Retry"}
+        retryLabel={resumed ? `Upload again: choose a file to replace ${name}` : `Retry ${name}`}
       />
       {detail && <p className="plan-upload-item-error">{detail}</p>}
     </li>
@@ -316,10 +508,16 @@ export const PlanUpload = {
   Note: PlanUploadNote,
 };
 
-/** Dashboard uploader: PDFs and CSVs, up to 5 files, then on to /summary. */
-export function FileUpload() {
+export type FileUploadProps = Omit<PlanUploadProviderProps, "children">;
+
+/**
+ * /budget uploader: PDFs and CSVs, up to 5 files. Never navigates or touches
+ * the URL; the parent listens through onSessionsChange / onUploadsChange /
+ * onActivityChange.
+ */
+export function FileUpload(props: FileUploadProps) {
   return (
-    <PlanUploadProvider>
+    <PlanUploadProvider {...props}>
       <Card data-slot="plan-upload" className="plan-upload">
         <PlanUploadHeader />
         <PlanUploadDropzone />

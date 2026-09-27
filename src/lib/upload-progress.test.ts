@@ -144,3 +144,42 @@ test("session_not_found copy explains expiry and is distinct from poll_failed", 
   assert.match(uploadFailureMessage("session_not_found"), /couldn.t find this upload.*expired or belong to another account/);
   assert.notEqual(uploadFailureMessage("session_not_found"), uploadFailureMessage("poll_failed"));
 });
+
+// ---- Cancel (HARNESS-BUDGET-CONSOLIDATION-001) ----
+import { TERMINAL_PHASES, cancelledProgress } from "./upload-progress.ts";
+
+test("cancelled marks the step it stopped at, with no failure copy", () => {
+  const steps = uploadSteps({ kind: "pdf", phase: "cancelled", step: "uploading" });
+  assert.equal(states(steps).split(" ").slice(0, 4).join(" "), "checking:done preparing:done uploading:cancelled queued:pending");
+  const stopped = steps.filter((s) => s.state === "cancelled");
+  assert.equal(stopped.length, 1);
+  assert.equal(stopped[0].detail, undefined);
+  assert.equal(active(steps).length, 0);
+  assert.equal(steps.some((s) => s.state === "failed" || s.state === "current"), false);
+  assert.equal(uploadStepAnnouncement({ kind: "pdf", phase: "cancelled", step: "uploading" }), "Cancelled");
+  assert.ok(TERMINAL_PHASES.has("cancelled"));
+});
+
+test("cancelled from the backend uses the last stage, else Queued", () => {
+  const byStage = uploadSteps({ kind: "pdf", phase: "cancelled", stage: "matching" });
+  assert.equal(byStage.find((s) => s.state === "cancelled")?.id, "matching");
+  const csv = uploadSteps({ kind: "csv", phase: "cancelled", stage: "extracting" });
+  assert.equal(csv.find((s) => s.state === "cancelled")?.id, "queued");
+  const none = uploadSteps({ phase: "cancelled", stage: null });
+  assert.equal(none.find((s) => s.state === "cancelled")?.id, "queued");
+  // A bogus step never lands on Done.
+  const bogus = uploadSteps({ kind: "csv", phase: "cancelled", step: "done" });
+  assert.equal(bogus.find((s) => s.state === "cancelled")?.id, "queued");
+});
+
+test("cancelledProgress keeps the running step and leaves terminal progress alone", () => {
+  assert.deepEqual(cancelledProgress({ kind: "csv", phase: "uploading", percent: 40 }), { kind: "csv", phase: "cancelled", step: "uploading" });
+  assert.deepEqual(cancelledProgress({ kind: "pdf", phase: "processing", stage: "extracting", detail: { done: 1, total: 3 } }),
+    { kind: "pdf", phase: "cancelled", step: "extracting", stage: "extracting" });
+  assert.deepEqual(cancelledProgress({ phase: "checking" }), { phase: "cancelled", step: "checking" });
+  for (const done of [
+    { phase: "succeeded", uploadId: "UPL_1" }, { phase: "failed", errorCode: "timeout" }, { phase: "cancelled", step: "queued" },
+  ] as UploadProgress[]) {
+    assert.equal(cancelledProgress(done), done);
+  }
+});

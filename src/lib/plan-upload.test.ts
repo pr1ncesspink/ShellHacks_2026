@@ -3,11 +3,19 @@ import test from "node:test";
 import {
   MAX_UPLOAD_FILES,
   UPLOAD_ACCEPT,
-  batchSummaryHref,
+  budgetWorkspaceState,
   classifyFiles,
   formatBytes,
+  isFinished,
+  listedFiles,
+  mergeUploadIds,
   newUploadItem,
+  queuedSessionIds,
   rejectionMessage,
+  resumedUploadItems,
+  succeededUploadIds,
+  uploadActivity,
+  uploadItemAnnouncement,
   uploadListReducer,
   type FileLike,
   type UploadItem,
@@ -113,25 +121,161 @@ test("uploadListReducer add, progress, queued, error, retry, remove, clear", () 
   assert.equal(uploadListReducer(state, { type: "remove", id: "2" }), state);
 });
 
-test("batchSummaryHref waits for every row to be queued, then links all sessions", () => {
-  const ses = (n: number) => `SES_${n.toString(16).padStart(32, "0")}`;
-  assert.equal(batchSummaryHref([]), null);
-  assert.equal(batchSummaryHref([{ sessionId: ses(1) }, { sessionId: null }]), null);
-  assert.equal(batchSummaryHref([{ sessionId: ses(1) }]), `/summary?sessions=${ses(1)}`);
-  assert.equal(
-    batchSummaryHref([{ sessionId: ses(1) }, { sessionId: ses(2) }]),
-    `/summary?sessions=${ses(1)},${ses(2)}`,
-  );
-  // A malformed id never produces a partial link.
-  assert.equal(batchSummaryHref([{ sessionId: ses(1) }, { sessionId: "SES_bad" }]), null);
+const ses = (n: number) => `SES_${n.toString(16).padStart(32, "0")}`;
+const add = (ids: string[]) =>
+  uploadListReducer<FileLike>([], { type: "add", items: ids.map((id) => ({ id, file: f(`${id}.pdf`), kind: "pdf" as const })) });
+
+test("queuedSessionIds waits for every accepted row to be queued, then lists sessions in row order", () => {
+  assert.deepEqual(queuedSessionIds([]), []);
+  let state = add(["a", "b"]);
+  assert.equal(queuedSessionIds(state), null);
+  state = uploadListReducer(state, { type: "queued", id: "a", attempt: 0, sessionId: ses(1) });
+  assert.equal(queuedSessionIds(state), null);
+  state = uploadListReducer(state, { type: "queued", id: "b", attempt: 0, sessionId: ses(2) });
+  assert.deepEqual(queuedSessionIds(state), [ses(1), ses(2)]);
+  // Malformed ids are dropped rather than put in the URL.
+  assert.deepEqual(queuedSessionIds([{ sessionId: "SES_bad", progress: { phase: "queued" } }]), []);
+  // Retry clears the session until the row is queued again.
+  state = uploadListReducer(state, { type: "retry", id: "a" });
+  assert.equal(queuedSessionIds(state), null);
 });
 
-test("batchSummaryHref follows the list reducer: retry clears the session until requeued", () => {
-  const ses = `SES_${"a".repeat(32)}`;
-  const file = { name: "a.pdf", size: 10, lastModified: 1 };
-  let state = uploadListReducer([], { type: "add", items: [{ id: "a", file, kind: "pdf" }] });
-  state = uploadListReducer(state, { type: "queued", id: "a", attempt: 0, sessionId: ses });
-  assert.equal(batchSummaryHref(state), `/summary?sessions=${ses}`);
-  state = uploadListReducer(state, { type: "retry", id: "a" });
-  assert.equal(batchSummaryHref(state), null);
+test("queuedSessionIds leaves out cancelled rows and rows that failed before queueing", () => {
+  let state = add(["a", "b", "c"]);
+  state = uploadListReducer(state, { type: "queued", id: "a", attempt: 0, sessionId: ses(1) });
+  state = uploadListReducer(state, { type: "error", id: "b", attempt: 0, message: "Network down" });
+  assert.equal(queuedSessionIds(state), null);
+  state = uploadListReducer(state, { type: "cancelled", id: "c", attempt: 0 });
+  assert.deepEqual(queuedSessionIds(state), [ses(1)]);
+  state = uploadListReducer(state, { type: "cancelled", id: "a", attempt: 0 });
+  assert.deepEqual(queuedSessionIds(state), []);
+});
+
+test("succeededUploadIds lists successful uploads only", () => {
+  let state = add(["a", "b", "c"]);
+  assert.deepEqual(succeededUploadIds(state), []);
+  state = uploadListReducer(state, { type: "progress", id: "b", attempt: 0, progress: { kind: "pdf", phase: "succeeded", uploadId: "UPL_2" } });
+  state = uploadListReducer(state, { type: "progress", id: "a", attempt: 0, progress: { kind: "pdf", phase: "failed", errorCode: "timeout" } });
+  state = uploadListReducer(state, { type: "cancelled", id: "c", attempt: 0 });
+  assert.deepEqual(succeededUploadIds(state), ["UPL_2"]);
+});
+
+test("cancel actions: Cancelling..., Cancelled, and a failed cancel", () => {
+  let state = add(["a"]);
+  state = uploadListReducer(state, { type: "progress", id: "a", attempt: 0, progress: { kind: "pdf", phase: "processing", stage: "locating" } });
+  state = uploadListReducer(state, { type: "cancelling", id: "a", attempt: 0 });
+  assert.equal(state[0].cancelling, true);
+  assert.equal(uploadItemAnnouncement(state[0]), "Cancelling...");
+  assert.equal(isFinished(state[0]), false);
+
+  const failed = uploadListReducer(state, { type: "cancel-failed", id: "a", attempt: 0, message: "Upload backend unavailable." });
+  assert.equal(failed[0].cancelling, false);
+  assert.equal(uploadItemAnnouncement(failed[0]), "Could not cancel. Upload backend unavailable.");
+
+  state = uploadListReducer(state, { type: "cancelled", id: "a", attempt: 0 });
+  assert.deepEqual(state[0].progress, { kind: "pdf", phase: "cancelled", step: "locating", stage: "locating" });
+  assert.equal(state[0].cancelling, false);
+  assert.equal(isFinished(state[0]), true);
+  assert.equal(uploadItemAnnouncement(state[0]), "Cancelled");
+
+  // Late progress or errors from the aborted run never revive a cancelled row.
+  const before = state;
+  state = uploadListReducer(state, { type: "progress", id: "a", attempt: 0, progress: { kind: "pdf", phase: "processing", stage: "saving" } });
+  state = uploadListReducer(state, { type: "error", id: "a", attempt: 0, message: "Upload cancelled" });
+  state = uploadListReducer(state, { type: "cancelling", id: "a", attempt: 0 });
+  assert.equal(state, before);
+  // Retry starts the row again; clear-finished drops it.
+  assert.equal(uploadListReducer(state, { type: "retry", id: "a" })[0].progress.phase, "checking");
+  assert.deepEqual(uploadListReducer(state, { type: "clear-finished" }), []);
+});
+
+test("a terminal poll result during Cancelling... ends the cancel", () => {
+  let state = add(["a"]);
+  state = uploadListReducer(state, { type: "cancelling", id: "a", attempt: 0 });
+  state = uploadListReducer(state, { type: "progress", id: "a", attempt: 0, progress: { kind: "pdf", phase: "succeeded", uploadId: "UPL_1" } });
+  assert.equal(state[0].cancelling, false);
+  assert.equal(state[0].uploadId, "UPL_1");
+});
+
+test("resumed rows: valid unique ids, no File, retry is a no-op, count toward the limit", () => {
+  const rows = resumedUploadItems([ses(1), "SES_bad", ses(1), ses(2)]);
+  assert.deepEqual(rows.map((row) => [row.id, row.sessionId, row.file, row.name, row.progress.phase]), [
+    [`resume-${ses(1)}`, ses(1), null, "Earlier upload 1", "queued"],
+    [`resume-${ses(2)}`, ses(2), null, "Earlier upload 2", "queued"],
+  ]);
+  assert.equal(resumedUploadItems([ses(3)])[0].name, "Earlier upload");
+  assert.equal(resumedUploadItems(Array.from({ length: 7 }, (_, i) => ses(i + 1))).length, MAX_UPLOAD_FILES);
+  assert.deepEqual(queuedSessionIds(rows), [ses(1), ses(2)]);
+  assert.equal(uploadListReducer(rows, { type: "retry", id: rows[0].id }), rows);
+
+  // Progress fills in the kind reported by the backend.
+  const csv = uploadListReducer(rows, { type: "progress", id: rows[0].id, attempt: 0, progress: { kind: "csv", phase: "processing", stage: "matching" } });
+  assert.equal(csv[0].kind, "csv");
+
+  const listed = listedFiles(rows);
+  const picked = [f("a.pdf"), f("b.pdf"), f("c.pdf"), f("d.pdf")];
+  const { accepted, rejected } = classifyFiles(listed, picked);
+  assert.equal(accepted.length, 3);
+  assert.deepEqual(rejected.map((r) => r.reason), ["limit"]);
+});
+
+test("uploadActivity counts every row and the non-terminal ones", () => {
+  const rows = [
+    { progress: { phase: "checking" } },
+    { progress: { phase: "queued" } },
+    { progress: { phase: "succeeded" } },
+    { progress: { phase: "failed" } },
+    { progress: { phase: "cancelled" } },
+  ] as Pick<UploadItem, "progress">[];
+  assert.deepEqual(uploadActivity(rows), { rows: 5, active: 2 });
+  assert.deepEqual(uploadActivity([]), { rows: 0, active: 0 });
+});
+
+test("mergeUploadIds keeps unique ids, newest last, dropping the oldest over the cap", () => {
+  assert.deepEqual(mergeUploadIds(["A"], ["B", "A", "C"]), ["A", "B", "C"]);
+  assert.deepEqual(mergeUploadIds([], []), []);
+  assert.deepEqual(mergeUploadIds(["A", "B", "C"], ["D", "E", "F"]), ["B", "C", "D", "E", "F"]);
+  assert.deepEqual(mergeUploadIds(["A", "B"], ["C"], 2), ["B", "C"]);
+});
+
+const idle = { rows: 0, active: 0 };
+const base = { activity: idle, initialSessionIds: [], initialUploadIds: [], sessionIds: [], uploaderUploadIds: [] };
+
+test("budgetWorkspaceState: empty page is not busy and leaves the URL alone", () => {
+  assert.deepEqual(budgetWorkspaceState(base), { busy: false, waiting: false, uploadIds: [], url: null });
+});
+
+test("budgetWorkspaceState: any row or URL id makes the page busy", () => {
+  assert.equal(budgetWorkspaceState({ ...base, activity: { rows: 1, active: 1 } }).busy, true);
+  assert.equal(budgetWorkspaceState({ ...base, activity: { rows: 1, active: 0 } }).busy, true);
+  assert.equal(budgetWorkspaceState({ ...base, initialSessionIds: ["SES_1"] }).busy, true);
+  assert.equal(budgetWorkspaceState({ ...base, initialUploadIds: ["UPL_1"] }).busy, true);
+});
+
+test("budgetWorkspaceState: waiting follows active rows, not session/upload counts", () => {
+  // A row failed after queueing: more sessions than uploads, but nothing active.
+  const failed = budgetWorkspaceState({ ...base, activity: { rows: 2, active: 0 }, sessionIds: ["SES_1", "SES_2"], uploaderUploadIds: ["UPL_1"] });
+  assert.equal(failed.waiting, false);
+  assert.deepEqual(failed.url, { key: "uploads", ids: ["UPL_1"] });
+  assert.equal(budgetWorkspaceState({ ...base, activity: { rows: 1, active: 1 } }).waiting, true);
+});
+
+test("budgetWorkspaceState: sessions while rows are active, then the union of uploads", () => {
+  const active = budgetWorkspaceState({ ...base, activity: { rows: 1, active: 1 }, initialUploadIds: ["UPL_A"], sessionIds: ["SES_1"] });
+  assert.deepEqual(active.uploadIds, ["UPL_A"]);
+  assert.deepEqual(active.url, { key: "sessions", ids: ["SES_1"] });
+  // Not queued yet: keep naming the uploads already shown.
+  const checking = budgetWorkspaceState({ ...base, activity: { rows: 1, active: 1 }, initialUploadIds: ["UPL_A"] });
+  assert.deepEqual(checking.url, { key: "uploads", ids: ["UPL_A"] });
+  const done = budgetWorkspaceState({ ...base, activity: { rows: 1, active: 0 }, initialUploadIds: ["UPL_A"], sessionIds: ["SES_1"], uploaderUploadIds: ["UPL_B"] });
+  assert.deepEqual(done.uploadIds, ["UPL_A", "UPL_B"]);
+  assert.deepEqual(done.url, { key: "uploads", ids: ["UPL_A", "UPL_B"] });
+});
+
+test("budgetWorkspaceState: failed-only batches keep sessions; cancelled-only clears the URL", () => {
+  const failed = budgetWorkspaceState({ ...base, activity: { rows: 1, active: 0 }, sessionIds: ["SES_1"] });
+  assert.deepEqual(failed.url, { key: "sessions", ids: ["SES_1"] });
+  const cancelled = budgetWorkspaceState({ ...base, activity: { rows: 1, active: 0 }, initialSessionIds: ["SES_1"] });
+  assert.equal(cancelled.url, null);
+  assert.equal(cancelled.waiting, false);
 });

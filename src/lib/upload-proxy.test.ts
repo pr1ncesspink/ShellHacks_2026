@@ -119,3 +119,21 @@ test("per-route messages override pass-through copy without changing statuses", 
   const server = await run(fakeFetch(500).impl, { ...opts, messages: { 404: "x" } });
   assert.deepEqual(server, { status: 502, body: { error: "Upload backend unavailable. Try again shortly." } });
 });
+
+test("sessionPath builds the cancel path and rejects bad ids for it", async () => {
+  assert.equal(sessionPath(ID, "cancel"), `projects/upload-sessions/${ID}/cancel`);
+  assert.equal(sessionPath(ID, "process"), `projects/upload-sessions/${ID}/process`);
+  for (const bad of ["SES_x", "../admin", `${ID}/../x`, ""]) assert.equal(sessionPath(bad, "cancel"), null);
+  const view = { session_id: ID, status: "cancelled", upload_id: null, error_code: null, updated_at: "2026-09-27T12:21:00Z" };
+  const { impl, calls } = fakeFetch(200, view);
+  const result = await run(impl, { path: sessionPath(ID, "cancel")!, parse: parseSessionState });
+  assert.equal(result.status, 200);
+  assert.equal((result.body as { status: string }).status, "cancelled");
+  assert.equal(calls[0].url, `https://api.example.test/prefix/projects/upload-sessions/${ID}/cancel`);
+  assert.equal(calls[0].init.method, "POST");
+  // Proxy copy for the cancel route: unknown/foreign -> 404 text, bad id -> 422, GcsError -> 502.
+  assert.deepEqual(await run(fakeFetch(404).impl, { path: sessionPath(ID, "cancel")!, parse: parseSessionState }),
+    { status: 404, body: { error: "Upload session not found." } });
+  assert.equal((await run(fakeFetch(422).impl, { path: sessionPath(ID, "cancel")!, parse: parseSessionState })).status, 422);
+  assert.equal((await run(fakeFetch(502).impl, { path: sessionPath(ID, "cancel")!, parse: parseSessionState })).status, 502);
+});

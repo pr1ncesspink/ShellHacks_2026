@@ -1,8 +1,9 @@
-import { CircleAlert, Database, FlaskConical, RotateCw } from "lucide-react";
+import Link from "next/link";
+import { CircleAlert, Database, FlaskConical, RotateCw, Upload } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
 import { PageHeading } from "@/components/workspace";
-import { FileUpload } from "@/components/file-upload";
 import { ProjectMap } from "@/components/project-map";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -80,8 +81,19 @@ export default async function DashboardPage() {
           title="Every overlap. One clear view."
           description="Understand where your projects connect, and where to look next."
         />
-        <section className="upload-section upload-section-first" aria-label="Construction plans">
-          <FileUpload />
+        <section className="upload-section upload-section-first" aria-labelledby="upload-plans-title">
+          <Card className="upload-cta panel">
+            <div className="upload-cta-copy">
+              <h2 id="upload-plans-title">Upload construction plans</h2>
+              <p>Upload a PDF or CSV on the Budget page to check it against known projects.</p>
+            </div>
+            <Button asChild size="touch">
+              <Link href="/budget">
+                <Upload aria-hidden="true" />
+                Go to Budget
+              </Link>
+            </Button>
+          </Card>
         </section>
         <div className="dashboard-grid">
           <section

@@ -6,7 +6,7 @@ import type { UploadProgress } from "./upload-progress.ts";
 export const MAX_UPLOAD_BYTES = 52_428_800;
 export const MAX_CSV_BYTES = 10_485_760;
 export const SESSION_ID = /^SES_[a-f0-9]{32}$/;
-export const SESSION_STATUSES = ["created", "queued", "processing", "succeeded", "failed"] as const;
+export const SESSION_STATUSES = ["created", "queued", "processing", "succeeded", "failed", "cancelled"] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 export const SESSION_STAGES = [
   "validating", "staging", "parsing", "extracting", "locating", "matching", "saving", "summarizing",
@@ -304,7 +304,7 @@ export function validateUploadFile(file: Blob, kind: UploadKind): Promise<PdfChe
   return kind === "csv" ? validateCsv(file) : validatePdf(file);
 }
 
-/** Raised when the caller aborts (row removed, retried, or page navigated away). */
+/** Raised when the caller aborts (row cancelled, removed, retried, or page navigated away). */
 export class UploadCancelledError extends Error {
   constructor() {
     super("Upload cancelled");
@@ -366,10 +366,16 @@ export const SESSION_STATUS_LABELS: Record<SessionStatus, string> = {
   processing: "Processing in Snowflake. Large plans can take a while...",
   succeeded: "Processing finished.",
   failed: "Processing failed.",
+  cancelled: "Upload cancelled.",
 };
 
-/** JSON call to /api/upload-sessions/*; failures become UploadApiError with a safe message. */
-export async function callUploadApi(path: string, init?: { method: "POST"; body?: unknown }, fetchImpl?: typeof fetch): Promise<unknown> {
+export type UploadApiInit = { method: "POST"; body?: unknown; signal?: AbortSignal };
+
+/**
+ * JSON call to /api/upload-sessions/*; failures become UploadApiError with a
+ * safe message. An abort through `init.signal` rejects with UploadCancelledError.
+ */
+export async function callUploadApi(path: string, init?: UploadApiInit, fetchImpl?: typeof fetch): Promise<unknown> {
   let response: Response;
   try {
     response = await (fetchImpl ?? fetch)(path, {
@@ -377,8 +383,10 @@ export async function callUploadApi(path: string, init?: { method: "POST"; body?
       cache: "no-store",
       headers: init?.body === undefined ? undefined : { "Content-Type": "application/json" },
       body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+      signal: init?.signal,
     });
   } catch {
+    if (init?.signal?.aborted) throw new UploadCancelledError();
     throw new UploadApiError(null, GENERIC_API_ERROR);
   }
   if (!response.ok) {
@@ -394,20 +402,27 @@ export async function callUploadApi(path: string, init?: { method: "POST"; body?
 }
 
 export type UploadSessionDeps = {
-  callApi?: (path: string, init?: { method: "POST"; body?: unknown }) => Promise<unknown>;
+  callApi?: (path: string, init?: UploadApiInit) => Promise<unknown>;
   put?: typeof putToSignedUrl;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   pollMs?: number;      // default 5_000
   pollLimitMs?: number; // default 70 * 60 * 1000
 };
-export type UploadSessionResult = SessionState & { status: "succeeded" | "failed" };
+export type TerminalSessionStatus = "succeeded" | "failed" | "cancelled";
+export type UploadSessionResult = SessionState & { status: TerminalSessionStatus };
 
 export type UploadSessionOptions = {
   /** Legacy plain-text status labels; prefer onProgress. */
   onStatus?: (label: string) => void;
   /** Structured progress for the stepper; emitted only when it changes. */
   onProgress?: (progress: UploadProgress) => void;
+  /**
+   * Fires once, right after the backend session exists and before the file is
+   * sent. Lets a caller cancel the session server-side if it aborts before
+   * onQueued.
+   */
+  onCreated?: (sessionId: string) => void;
   /** Fires once, after /process succeeds and before polling starts. */
   onQueued?: (sessionId: string) => void;
   signal?: AbortSignal;
@@ -415,7 +430,10 @@ export type UploadSessionOptions = {
   kind?: UploadKind;
 };
 
-const terminal = (s: SessionStatus): s is "succeeded" | "failed" => s === "succeeded" || s === "failed";
+/** Succeeded, failed and cancelled sessions never change again. */
+export const isTerminalStatus = (s: SessionStatus): s is TerminalSessionStatus =>
+  s === "succeeded" || s === "failed" || s === "cancelled";
+const terminal = isTerminalStatus;
 
 /** UploadProgress for a session status plus its latest polled state (null before the first poll). */
 export function sessionProgress(status: SessionStatus, state: SessionState | null, kind?: UploadKind): UploadProgress {
@@ -431,6 +449,9 @@ export function sessionProgress(status: SessionStatus, state: SessionState | nul
       return state?.upload_id ? { ...base, phase: "succeeded", uploadId: state.upload_id } : { ...base, phase: "succeeded" };
     case "failed":
       return { ...base, phase: "failed", stage: state?.stage ?? null, errorCode: state?.error_code ?? null };
+    case "cancelled":
+      // The cancelled view carries no stage keys; callers may fill in the last one seen.
+      return { ...base, phase: "cancelled", stage: state?.stage ?? null };
   }
 }
 
@@ -521,7 +542,10 @@ async function pollLoop(r: Runner, sessionId: string, initial: SessionStatus | n
           current = latest.status;
           if (!terminal(current)) continue;
         }
-        r.emit(sessionProgress(current, latest, r.kind));
+        const done = sessionProgress(current, latest, r.kind);
+        // Show a cancel at the step the job had reached.
+        if (done.phase === "cancelled" && !done.stage) done.stage = r.stage;
+        r.emit(done);
         return { ...latest, status: current };
       }
       r.emit(sessionProgress(current, latest, r.kind));
@@ -578,6 +602,7 @@ export async function runUploadSession(
       method: "POST", body: { size_bytes: file.size, content_type: UPLOAD_CONTENT_TYPES[kind] },
     }));
     if (session.required_headers["Content-Type"] !== UPLOAD_CONTENT_TYPES[kind]) throw new Error("Invalid required_headers");
+    options.onCreated?.(session.session_id);
     r.guard();
     r.step = "uploading";
     r.onStatus?.("Uploading 0%");
@@ -600,12 +625,12 @@ export async function runUploadSession(
 }
 
 /**
- * Resume polling an existing session (the /summary page). Emits the same
- * progress as runUploadSession from the queued step on.
+ * Resume polling an existing session (a reload of /budget?sessions=...). Emits
+ * the same progress as runUploadSession from the queued step on.
  */
 export async function pollUploadSession(
   sessionId: string,
-  options: Omit<UploadSessionOptions, "onQueued">,
+  options: Omit<UploadSessionOptions, "onQueued" | "onCreated">,
   deps: UploadSessionDeps = {},
 ): Promise<UploadSessionResult> {
   if (!SESSION_ID.test(sessionId)) throw new Error("Invalid session_id");
@@ -615,4 +640,44 @@ export async function pollUploadSession(
     r.guard();
     return pollLoop(r, sessionId, null);
   });
+}
+
+/** Waits before each cancel retry; the backend answers 502 when a cancel write loses a race. */
+export const CANCEL_RETRY_DELAYS_MS = [1_000, 2_000] as const;
+
+/**
+ * Ask the backend to stop a session everywhere (browser polling is the
+ * caller's job). Resolves with the session view: status "cancelled", or the
+ * unchanged terminal status when the session had already finished. Network
+ * failures and 502/503 are retried after CANCEL_RETRY_DELAYS_MS (cancel is
+ * idempotent); other errors reject at once. An abort through `signal`
+ * rejects with UploadCancelledError.
+ */
+export async function cancelUploadSession(
+  sessionId: string,
+  options: { signal?: AbortSignal } = {},
+  deps: Pick<UploadSessionDeps, "callApi" | "sleep"> & { retryDelaysMs?: readonly number[] } = {},
+): Promise<SessionState> {
+  if (!SESSION_ID.test(sessionId)) throw new Error("Invalid session_id");
+  const { signal } = options;
+  const guard = () => { if (signal?.aborted) throw new UploadCancelledError(); };
+  const callApi = deps.callApi ?? ((path: string, init?: UploadApiInit) => callUploadApi(path, init));
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(done => setTimeout(done, ms)));
+  const delays = deps.retryDelaysMs ?? CANCEL_RETRY_DELAYS_MS;
+  for (let attempt = 0; ; attempt += 1) {
+    guard();
+    let raw: unknown;
+    try {
+      raw = await callApi(`/api/upload-sessions/${sessionId}/cancel`, { method: "POST", signal });
+    } catch (reason) {
+      guard();
+      if (!isTransientPollError(reason) || attempt >= delays.length) throw reason;
+      await sleep(delays[attempt]);
+      continue;
+    }
+    guard();
+    const state = parseSessionState(raw);
+    if (state.session_id !== sessionId) throw new Error("Invalid session_id");
+    return state;
+  }
 }

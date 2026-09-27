@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   title: { default: "CollideAverse — Project Clarity", template: "%s | CollideAverse" },
   description:
     "A clearer view of construction project overlap and coordination.",
-  icons: { icon: "/gridlens-mark.svg" },
+  icons: { icon: "/collideaverse-icon.png", apple: "/collideaverse-logo.jpg" },
 };
 export const viewport: Viewport = { themeColor: "#101d30" };
 export default async function RootLayout({

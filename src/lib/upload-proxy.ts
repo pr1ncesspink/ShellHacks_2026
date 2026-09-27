@@ -48,7 +48,7 @@ function passThroughMessage(status: number, messages: PassThroughMessages | unde
 }
 
 /** Backend path for a session, or null when the id is not a valid session id. */
-export function sessionPath(id: string, action?: "process"): string | null {
+export function sessionPath(id: string, action?: "process" | "cancel"): string | null {
   if (!SESSION_ID.test(id)) return null;
   return `projects/upload-sessions/${id}${action ? `/${action}` : ""}`;
 }

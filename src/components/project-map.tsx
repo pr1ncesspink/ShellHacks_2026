@@ -6,11 +6,12 @@ import type * as Leaflet from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { collisionFocus } from "@/lib/map-focus";
 import { nearbyRecordIds } from "@/lib/project-proximity";
-import type { MapLayers, MapPoint } from "@/lib/upload-summary";
+import type { MapBounds, MapLayers, MapPoint } from "@/lib/upload-summary";
 
 // Type-only: the 150 KB reference JSON is loaded lazily (reference mode only),
-// so the upload-mode map on /summary never downloads it.
+// so the upload-mode map on /budget never downloads it once layers arrive.
 type DefaultLocations = typeof import("@/data/project-locations.json");
 type ProjectLocation = DefaultLocations[number] & { source_document?: string; user_supplied?: boolean };
 
@@ -34,7 +35,8 @@ export type ProjectMapProps = {
   /**
    * Upload mode (from buildMapLayers): uploaded points as violet rings,
    * reference points muted, dashed collision links with a distance tooltip,
-   * fitted to `bounds`, plus a table fallback. Replaces `locations` when set.
+   * zoomed to the collisions (collisionFocus) whenever that set changes, plus
+   * a table fallback. Replaces `locations` when set.
    */
   layers?: MapLayers;
   title?: string;
@@ -55,6 +57,8 @@ const MARKER_CLASS = {
 } as const;
 
 const US_VIEW: [number, number] = [38, -98];
+/** Upload-mode fit: room around the collisions, never closer than street level. */
+const FOCUS_FIT = { padding: [48, 48] as [number, number], maxZoom: 13 };
 
 function textBlock(className: string, title: string, lines: string[]): HTMLDivElement {
   const root = document.createElement("div");
@@ -262,8 +266,9 @@ export function ProjectMap({ focusedRecordId, navigateToBudget = true, locations
   const focused = layers ? undefined : points.find(point => point.record_id === focusedRecordId);
   const container = useRef<HTMLDivElement>(null);
   const [handle, setHandle] = useState<MapHandle | null>(null);
-  /** Bounds last fitted in upload mode; refit only when new data falls outside. */
-  const fittedRef = useRef<Leaflet.LatLngBounds | null>(null);
+  /** collisionFocus key last fitted in upload mode; refit only when it changes. */
+  const fittedKeyRef = useRef<string | null>(null);
+  const focus = useMemo(() => (layers ? collisionFocus(layers) : null), [layers]);
   const [message, setMessage] = useState("Loading project map…");
   const projectCount = useMemo(() => new Set(points.map((p) => p.project_id)).size, [points]);
 
@@ -306,7 +311,7 @@ export function ProjectMap({ focusedRecordId, navigateToBudget = true, locations
       disposed = true;
       observer?.disconnect();
       created?.remove();
-      fittedRef.current = null;
+      fittedKeyRef.current = null;
       setHandle(null);
     };
   }, []);
@@ -315,33 +320,36 @@ export function ProjectMap({ focusedRecordId, navigateToBudget = true, locations
     if (!handle) return;
     const { L, map, group, reduced } = handle;
     group.clearLayers();
-    if (layers) {
-      if (layers.bounds) {
-        const next = L.latLngBounds(layers.bounds);
-        const fitted = fittedRef.current;
-        // Fit on the first data and whenever the data grows past what is shown.
-        if (!fitted || !fitted.contains(next)) {
-          map.fitBounds(next, { padding: [32, 32], maxZoom: 11, animate: !reduced });
-          fittedRef.current = next;
-        }
+    if (layers && focus) {
+      // Zoom to the collisions when the set of collisions (or the fallback
+      // uploaded points) changes; otherwise leave the user's view alone.
+      if (fittedKeyRef.current !== focus.key) {
+        fittedKeyRef.current = focus.key;
+        if (focus.bounds) map.fitBounds(L.latLngBounds(focus.bounds), { ...FOCUS_FIT, animate: !reduced });
+        else map.setView(US_VIEW, 3, { animate: !reduced });
       }
       drawLayers(L, group, layers);
       return;
     }
     if (!pointsReady) return;
-    fittedRef.current = null;
+    fittedKeyRef.current = null;
     if (focused) map.setView([focused.latitude, focused.longitude], 11, { animate: !reduced });
     else if (points.length) map.fitBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]), { padding: [24, 24], animate: !reduced });
     else map.setView(US_VIEW, 3, { animate: !reduced });
     const openProject = navigateToBudget ? (recordId: string) => router.push(`/budget?project=${encodeURIComponent(recordId)}`) : null;
     drawLocations(L, group, points, nearby, focusedRecordId, openProject);
-  }, [handle, layers, pointsReady, focused, focusedRecordId, navigateToBudget, router, points, nearby]);
+  }, [handle, layers, focus, pointsReady, focused, focusedRecordId, navigateToBudget, router, points, nearby]);
+
+  function fitTo(bounds: MapBounds | null) {
+    if (!handle || !bounds) return;
+    handle.map.fitBounds(bounds, { ...FOCUS_FIT, animate: !handle.reduced });
+  }
 
   function resetView() {
     if (!handle) return;
     const { map, reduced } = handle;
     const animate = !reduced;
-    if (layers) { if (layers.bounds) map.fitBounds(layers.bounds, { padding: [32, 32], maxZoom: 11, animate }); return; }
+    if (layers) { fitTo(layers.bounds); return; }
     if (focused) { map.setView([focused.latitude, focused.longitude], 11, { animate }); return; }
     if (points.length) map.fitBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]), { padding: [24, 24], animate });
   }
@@ -350,13 +358,29 @@ export function ProjectMap({ focusedRecordId, navigateToBudget = true, locations
   const showFocused = Boolean(focused) || (!pointsReady && Boolean(focusedRecordId));
   const pointCount = layers ? layers.uploaded.length + layers.reference.length : points.length;
   const heading = title ?? (layers ? "Uploaded projects and nearby references" : showFocused ? "Selected project area" : "Project landscape");
+  const focusLabel = focus ? `${focus.label}.` : "";
   return (
     <Card className="map-card panel project-map-card">
-      <div className="panel-heading">
-        <div><span className="eyebrow">Spatial context</span><h2>{heading}</h2></div>
-        <Button type="button" variant="outline" size="touch" onClick={resetView}>{showFocused ? "Recenter" : "Show all"}</Button>
+      <div className="panel-heading flex-wrap">
+        <div className="min-w-0"><span className="eyebrow">Spatial context</span><h2>{heading}</h2></div>
+        {layers && focus
+          ? (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="touch" disabled={focus.kind !== "collisions"} onClick={() => fitTo(focus.bounds)}>
+                Zoom to collisions
+              </Button>
+              <Button type="button" variant="outline" size="touch" onClick={resetView}>Show all</Button>
+            </div>
+          )
+          : <Button type="button" variant="outline" size="touch" onClick={resetView}>{showFocused ? "Recenter" : "Show all"}</Button>}
       </div>
-      <div ref={container} className="project-map-canvas" role="region" aria-label={`Project location map: ${pointCount} points. Use arrow keys to pan and plus or minus to zoom.`} />
+      <div
+        ref={container}
+        className="project-map-canvas"
+        role="region"
+        aria-label={`Project location map: ${pointCount} points. ${focusLabel ? `${focusLabel} ` : ""}Use arrow keys to pan and plus or minus to zoom.`}
+      />
+      {focus && <p className="project-map-note" role="status">{focusLabel}</p>}
       {message && <p className="project-map-message" role="status">{message}</p>}
       <MapLegend upload={Boolean(layers)} />
       <div className="map-footer">
@@ -372,7 +396,7 @@ export function ProjectMap({ focusedRecordId, navigateToBudget = true, locations
           <p className="project-map-note">Lines join each uploaded project to nearby reference projects. Proximity does not confirm construction or schedule overlap.</p>
           <NearestTable layers={layers} />
         </>
-        : <p className="project-map-note">{navigateToBudget ? "Select a point to open its project area and schedule planner." : "The outlined marker is your selected location. Click nearby points for details."} Proximity does not confirm construction or schedule overlap.</p>}
+        : <p className="project-map-note">{navigateToBudget ? "Select a point to focus the map on its project area." : "The outlined marker is your selected location. Click nearby points for details."} Proximity does not confirm construction or schedule overlap.</p>}
     </Card>
   );
 }

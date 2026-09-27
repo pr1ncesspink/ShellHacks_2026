@@ -1,4 +1,4 @@
-// Client-safe parsers and helpers for the /summary flow: id lists in the URL,
+// Client-safe parsers and helpers for the /budget upload flow: id lists in the URL,
 // the owner-scoped upload list, per-upload Gemini/rule-based summaries, and the
 // map payload (uploaded points plus nearby reference collisions). The API
 // routes re-serialize backend JSON through these parsers, so only allow-listed
@@ -35,10 +35,10 @@ export function parseIdList(param: string | readonly string[] | null | undefined
   return ids;
 }
 
-/** /summary link for session ids (right after upload) or upload ids (durable). */
-export function summaryHref(key: "sessions" | "uploads", ids: readonly string[]): string {
+/** /budget link for session ids (right after upload) or upload ids (durable). */
+export function budgetHref(key: "sessions" | "uploads", ids: readonly string[]): string {
   const valid = parseIdList(ids, key === "sessions" ? "SES_" : "UPL_");
-  return valid.length ? `/summary?${key}=${valid.join(",")}` : "/summary";
+  return valid.length ? `/budget?${key}=${valid.join(",")}` : "/budget";
 }
 
 /** Backend path (relative to BACKEND_URL) for an upload resource, or null for a bad id. */

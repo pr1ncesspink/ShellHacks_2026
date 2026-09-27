@@ -1,10 +1,17 @@
 // Pure mapping from an upload's progress to the ordered stepper rows shown in
-// the dashboard and on /summary. No React, no I/O: safe for node tests.
+// on /budget. No React, no I/O: safe for node tests.
 import type { SessionStage, UploadKind } from "./upload-sessions.ts";
 
-export type UploadPhase = "checking" | "preparing" | "uploading" | "queued" | "processing" | "succeeded" | "failed";
+export type UploadPhase =
+  | "checking" | "preparing" | "uploading" | "queued" | "processing" | "succeeded" | "failed" | "cancelled";
 
-/** Frozen contract (HARNESS-FRONTEND-REVAMP-001); `kind` is an additive optional field. */
+/** Phases that never change again. */
+export const TERMINAL_PHASES: ReadonlySet<UploadPhase> = new Set(["succeeded", "failed", "cancelled"]);
+
+/**
+ * Frozen contract (HARNESS-FRONTEND-REVAMP-001); `kind` and `step` are
+ * additive optional fields.
+ */
 export type UploadProgress = {
   phase: UploadPhase;
   stage?: SessionStage | null;
@@ -13,13 +20,15 @@ export type UploadProgress = {
   errorCode?: string | null;
   uploadId?: string;
   kind?: UploadKind;
+  /** For phase "cancelled": the step that was running when the user stopped it. */
+  step?: UploadStepId;
 };
 
 export type UploadStepId =
   | "checking" | "preparing" | "uploading" | "queued"
   | "staging" | "parsing" | "extracting" | "locating" | "matching" | "saving" | "summarizing"
   | "done";
-export type UploadStepState = "done" | "current" | "pending" | "failed";
+export type UploadStepState = "done" | "current" | "pending" | "failed" | "cancelled";
 export type UploadStep = { id: UploadStepId; label: string; state: UploadStepState; detail?: string };
 
 const PDF_STEPS: readonly UploadStepId[] = [
@@ -123,7 +132,23 @@ function currentStep(progress: UploadProgress, ids: readonly UploadStepId[]): Up
       return "done";
     case "failed":
       return failedStep(progress, ids);
+    case "cancelled":
+      if (progress.step && progress.step !== "done" && ids.includes(progress.step)) return progress.step;
+      return stageStep(progress.stage, ids) ?? "queued";
   }
+}
+
+/**
+ * Progress for a row the user just stopped: the step that was running is kept
+ * so the stepper shows where it stopped. Terminal progress is returned as is.
+ */
+export function cancelledProgress(progress: UploadProgress): UploadProgress {
+  if (TERMINAL_PHASES.has(progress.phase)) return progress;
+  const step = currentStep(progress, uploadStepIds(progress.kind));
+  const cancelled: UploadProgress = { phase: "cancelled", step };
+  if (progress.kind) cancelled.kind = progress.kind;
+  if (progress.stage) cancelled.stage = progress.stage;
+  return cancelled;
 }
 
 function clampPercent(value: number | undefined): number {
@@ -141,8 +166,9 @@ function currentDetail(id: UploadStepId, progress: UploadProgress): string | und
 }
 
 /**
- * Stepper rows for an upload. Exactly one row is current (or failed) until
- * the upload succeeds, when every row is done.
+ * Stepper rows for an upload. Exactly one row is current (or failed, or
+ * cancelled) until the upload succeeds, when every row is done. A cancelled
+ * row has no detail and no failure copy.
  */
 export function uploadSteps(progress: UploadProgress): UploadStep[] {
   const kind = progress.kind ?? "pdf";
@@ -158,6 +184,7 @@ export function uploadSteps(progress: UploadProgress): UploadStep[] {
     if (index < activeIndex) return { id, label, state: "done" };
     if (index > activeIndex) return { id, label, state: "pending" };
     if (failed) return { id, label, state: "failed", detail: uploadFailureMessage(progress.errorCode, kind) };
+    if (progress.phase === "cancelled") return { id, label, state: "cancelled" };
     const detail = currentDetail(id, progress);
     return detail === undefined ? { id, label, state: "current" } : { id, label, state: "current", detail };
   });
@@ -170,6 +197,7 @@ export function uploadSteps(progress: UploadProgress): UploadStep[] {
 export function uploadStepAnnouncement(progress: UploadProgress): string {
   const steps = uploadSteps(progress);
   if (progress.phase === "succeeded") return "Done";
+  if (progress.phase === "cancelled") return "Cancelled";
   const active = steps.find((step) => step.state === "current" || step.state === "failed");
   if (!active) return "";
   return active.state === "failed" ? `Failed at ${active.label.toLowerCase()}` : active.label;
