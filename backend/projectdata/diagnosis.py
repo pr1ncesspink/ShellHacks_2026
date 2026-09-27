@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 
 from backend.app.agents.collision_pipeline.clients import DiagnosisClient
@@ -82,7 +83,8 @@ def upload_diagnosis_input(
 class UploadDiagnosisService:
     def __init__(
         self, encoder_provider: Callable[[], Encoder], client: DiagnosisClient,
-        thresholds: Thresholds, model_id: str, prompt_version: str,
+        thresholds: Thresholds, model_id: str, prompt_version: str, *,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.encoder_provider = encoder_provider
         self.client = client
@@ -91,6 +93,8 @@ class UploadDiagnosisService:
         self.prompt_version = prompt_version
         self._cache: dict[str, DiagnosisEnvelope] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._failure_expiry: dict[str, float] = {}
+        self._clock = clock
 
     def prepare(self, collision: dict) -> tuple[DiagnosisInput, TimingBasis, list[str]]:
         """Synchronous (encoder) step; routes run it in the threadpool."""
@@ -104,7 +108,7 @@ class UploadDiagnosisService:
         diagnosis = await run_diagnosis(
             diagnosis_input, None, overlap_id=overlap_id, client=self.client,
             thresholds=self.thresholds, model_id=self.model_id, prompt_version=self.prompt_version,
-            cache=self._cache, locks=self._locks,
+            cache=self._cache, locks=self._locks, failure_expiry=self._failure_expiry, clock=self._clock,
         )
         return UploadDiagnosisResult(
             upload_id=upload_id, overlap_id=overlap_id, timing_basis=basis,

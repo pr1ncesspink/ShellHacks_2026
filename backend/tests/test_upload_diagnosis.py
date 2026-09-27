@@ -289,3 +289,28 @@ def test_route_runs_blocking_steps_off_event_loop(fake_encoder):
 def test_rate_limit_path():
     assert AGENT_PATH.fullmatch(PATH)
     assert not AGENT_PATH.fullmatch(PATH + "/extra")
+
+
+def test_upload_service_retries_rule_only_after_ttl(fake_encoder):
+    class FlakyClient(StubClient):
+        async def diagnose(self, diagnosis_input):
+            self.calls += 1
+            if self.calls == 1:
+                return DiagnosisClientResult(None)
+            return DiagnosisClientResult(DiagnosisDecision(verdict=self.verdict, rationale="Move the work."))
+
+    now = [0.0]
+    client = FlakyClient()
+    subject = UploadDiagnosisService(
+        lambda: fake_encoder, client, Thresholds(), "stub-model", "diag.v2", clock=lambda: now[0],
+    )
+    stored = collision()
+    first = asyncio.run(subject.diagnose(UPLOAD, stored))
+    assert first.diagnosis.status == "rule_only"
+    now[0] = 29.0
+    assert asyncio.run(subject.diagnose(UPLOAD, stored)).diagnosis.cached is True
+    assert client.calls == 1
+    now[0] = 30.0
+    second = asyncio.run(subject.diagnose(UPLOAD, stored))
+    assert client.calls == 2
+    assert second.diagnosis.status == "model" and second.diagnosis.cached is False
