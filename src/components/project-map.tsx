@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Map as LeafletMap } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import points from "@/data/project-locations.json";
+import defaultLocations from "@/data/project-locations.json";
 import { Card } from "@/components/ui/card";
 import { nearbyRecordIds } from "@/lib/project-proximity";
 
-const nearby = nearbyRecordIds(points);
+type ProjectLocation = (typeof defaultLocations)[number] & { source_document?: string; user_supplied?: boolean };
 
-export function ProjectMap() {
+export function ProjectMap({ focusedRecordId, navigateToBudget = true, locations = defaultLocations }: { focusedRecordId?: string; navigateToBudget?: boolean; locations?: ProjectLocation[] }) {
+  const points = locations;
+  const nearby = useMemo(() => nearbyRecordIds(points), [points]);
+  const router = useRouter();
+  const focused = points.find(point => point.record_id === focusedRecordId);
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const [message, setMessage] = useState("Loading project map…");
@@ -22,7 +27,8 @@ export function ProjectMap() {
       if (disposed || !container.current) return;
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const map = L.map(container.current, {
-        scrollWheelZoom: false, zoomAnimation: !reduced, fadeAnimation: !reduced,
+        scrollWheelZoom: true, touchZoom: true, zoomSnap: 0.25,
+        zoomAnimation: !reduced, fadeAnimation: !reduced,
       });
       mapRef.current = map;
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -31,6 +37,9 @@ export function ProjectMap() {
       }).on("tileerror", () => {
         if (!disposed) setMessage("Basemap unavailable. Project markers are still shown; check your connection.");
       }).addTo(map);
+      if (focused) map.setView([focused.latitude, focused.longitude], 11);
+      else if (points.length) map.fitBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]), { padding: [24, 24] });
+      else map.setView([38, -98], 3);
       // Group coincident coordinates so every record remains accessible in its popup.
       const groups = new Map<string, typeof points>();
       for (const point of points) {
@@ -40,6 +49,7 @@ export function ProjectMap() {
       for (const group of groups.values()) {
         const first = group[0];
         const isNearby = group.some((p) => nearby.has(p.record_id));
+        const isUserSupplied = group.some(p => p.user_supplied || p.source_document || p.coordinate_method === "user_reviewed_pdf");
         const tooltip = document.createElement("div");
         tooltip.className = "project-map-tooltip-content";
         const names = document.createElement("strong");
@@ -67,15 +77,32 @@ export function ProjectMap() {
           const proximity = document.createElement("p");
           proximity.textContent = nearby.has(p.record_id) ? "Another project is within 25 miles." : "No other project within 25 miles.";
           section.append(title, detail, year, location, proximity);
+          const link = document.createElement("a");
+          link.href = `/budget?project=${encodeURIComponent(p.record_id)}`;
+          link.textContent = "View this project";
+          section.append(link);
           popup.append(section);
         }
-        L.circleMarker([first.latitude, first.longitude], {
-          radius: 5, color: "#ffffff", weight: 1.5,
-          fillColor: isNearby ? "#f59a45" : "#1d84f5", fillOpacity: 0.9,
+        const selected = group.some(p => p.record_id === focusedRecordId);
+        const marker = L.circleMarker([first.latitude, first.longitude], {
+          radius: selected ? 9 : 5, color: selected ? "#00afb8" : "#ffffff", weight: selected ? 3 : 1.5,
+          fillColor: isUserSupplied ? "#e65598" : isNearby ? "#9d57de" : "#1d84f5", fillOpacity: 1,
         }).bindTooltip(tooltip, { direction: "top", className: "project-location-tooltip" })
-          .bindPopup(popup, { maxWidth: 300, maxHeight: 240 }).addTo(map);
+          .addTo(map);
+        if (navigateToBudget) {
+          const openProject = () => router.push(`/budget?project=${encodeURIComponent(first.record_id)}`);
+          marker.on("click", openProject);
+          const element = marker.getElement();
+          element?.setAttribute("tabindex", "0");
+          element?.setAttribute("role", "link");
+          element?.setAttribute("aria-label", `Open project area: ${group.map(p => p.project_name).join(", ")}`);
+          element?.addEventListener("keydown", event => {
+            if (event instanceof KeyboardEvent && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openProject(); }
+          });
+        } else {
+          marker.bindPopup(popup, { maxWidth: 300, maxHeight: 240 });
+        }
       }
-      map.fitBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]), { padding: [24, 24] });
       observer = new ResizeObserver(() => map.invalidateSize());
       observer.observe(container.current);
       setMessage("");
@@ -86,22 +113,24 @@ export function ProjectMap() {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [focused, focusedRecordId, navigateToBudget, router, points, nearby]);
 
   function resetView() {
-    mapRef.current?.fitBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]), { padding: [24, 24] });
+    if (focused) { mapRef.current?.setView([focused.latitude, focused.longitude], 11); return; }
+    if (points.length) mapRef.current?.fitBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]), { padding: [24, 24] });
   }
 
   return (
     <Card className="map-card panel project-map-card">
       <div className="panel-heading">
-        <div><span className="eyebrow">SPATIAL CONTEXT</span><h2>Project landscape</h2></div>
-        <button type="button" className="map-reset" onClick={resetView}>Show all</button>
+        <div><span className="eyebrow">SPATIAL CONTEXT</span><h2>{focused ? "Selected project area" : "Project landscape"}</h2></div>
+        <button type="button" className="map-reset" onClick={resetView}>{focused ? "Recenter" : "Show all"}</button>
       </div>
       <div ref={container} className="project-map-canvas" role="region" aria-label={`Project location map: ${points.length} points. Use arrow keys to pan and plus or minus to zoom.`} />
       {message && <p className="project-map-message" role="status">{message}</p>}
       <div className="map-footer"><span>{points.length} locations · {projectCount} projects</span><span>CSV location data</span></div>
-      <p className="project-map-note">Orange: another project within 25 miles (inclusive). Blue: no other project within 25 miles. Hover or click for the year and details. Proximity does not confirm construction or schedule overlap.</p>
+      {focused && <p className="project-map-note"><strong>{focused.project_name}</strong> · {focused.latitude}, {focused.longitude}</p>}
+      <p className="project-map-note">Purple: another project within 25 miles (inclusive). Blue: no other project within 25 miles. Pink: user-supplied locations (takes priority over proximity coloring). {navigateToBudget ? "Select a point to open its project area and schedule planner." : "The teal outline marks your selected location. Click nearby points for details."} Proximity does not confirm construction or schedule overlap.</p>
     </Card>
   );
 }

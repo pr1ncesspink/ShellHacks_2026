@@ -63,3 +63,22 @@ def test_diagnosis_threshold_environment_overrides(monkeypatch):
 def test_similarity_rule_uses_unrounded_value_at_the_threshold_boundary():
     assert allowed_verdicts(overlap("near", 1, 1, 0.44996), Thresholds()) == ("RESEQUENCE",)
     assert allowed_verdicts(overlap("exact", 1, 1, 0.45), Thresholds()) == ("CO_SCHEDULE", "RESEQUENCE")
+
+
+def test_unknown_timing_removes_co_schedule_and_preserves_no_action():
+    high_similarity = overlap("unknown", 1, 0, 0.9).model_copy(update={"timing_basis": "timing_unknown"})
+    assert allowed_verdicts(high_similarity, Thresholds()) == ("RESEQUENCE",)
+    assert allowed_verdicts(high_similarity.model_copy(update={"distance_mi": 20}), Thresholds()) == ("NO_ACTION",)
+    result = guard({"verdict": "CO_SCHEDULE", "rationale": "model choice"}, high_similarity, Thresholds())
+    assert result.decision.verdict == "RESEQUENCE"
+    assert result.overridden is True
+
+
+@pytest.mark.parametrize("distance,gap,similarity", [
+    (1, 0, 0.9), (1, 100, 0.1), (20, 0, 0.9), (1, 1460, 0.9),
+])
+def test_default_and_year_precision_keep_existing_rules(distance, gap, similarity):
+    exact = overlap("default", distance, gap, similarity)
+    year = exact.model_copy(update={"timing_basis": "year_precision"})
+    assert exact.timing_basis == "exact_dates"
+    assert allowed_verdicts(exact, Thresholds()) == allowed_verdicts(year, Thresholds())

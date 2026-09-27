@@ -1,9 +1,6 @@
-export type SignUpFlowResult<TUser> = {
-  user: TUser;
+export type SignUpFlowResult = {
   profileUpdated: boolean;
   verificationSent: boolean;
-  profileError?: unknown;
-  verificationError?: unknown;
 };
 
 export async function runSignUpFlow<TUser>({
@@ -14,25 +11,19 @@ export async function runSignUpFlow<TUser>({
   createUser: () => Promise<TUser>;
   updateUserProfile: (user: TUser) => Promise<void>;
   sendVerification: (user: TUser) => Promise<void>;
-}): Promise<SignUpFlowResult<TUser>> {
+}): Promise<SignUpFlowResult> {
   const user = await createUser();
-  let profileError: unknown;
-  let verificationError: unknown;
+  let profileUpdated = true;
+  let verificationSent = true;
   try {
     await updateUserProfile(user);
-  } catch (error) {
-    profileError = error;
+  } catch {
+    profileUpdated = false;
   }
   try {
     await sendVerification(user);
-  } catch (error) {
-    verificationError = error;
+  } catch {
+    verificationSent = false;
   }
-  return {
-    user,
-    profileUpdated: profileError === undefined,
-    verificationSent: verificationError === undefined,
-    ...(profileError === undefined ? {} : { profileError }),
-    ...(verificationError === undefined ? {} : { verificationError }),
-  };
+  return { profileUpdated, verificationSent };
 }

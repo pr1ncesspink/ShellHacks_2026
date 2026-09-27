@@ -8,6 +8,50 @@ mode does not require Python, Cloud Run credentials, or a running backend.
 
 ## Frontend
 
+### Local design preview (no sign-in)
+
+To edit the frontend without Firebase setup, add `GRIDLENS_LOCAL_PREVIEW=1`
+to your ignored `.env.local`, then run `npm run dev` and open
+`http://127.0.0.1:5173/dashboard`. This opt-in works only in development on a
+loopback address. It shows a preview account and example similarity data,
+while the map uses the bundled project dataset. To read real local similarity
+results, set `BACKEND_URL=http://127.0.0.1:8002` and `BACKEND_AUTH=none`.
+Preview mode only allows a loopback backend and sends no authenticated user
+header. It does not connect to Cloud Run. Public hostnames and production
+builds still require real sign-in. Remove the setting to test Firebase locally.
+
+### Real sign-in
+
+The Budget Summary schedule planner posts its displayed locations to `/api/map-analysis`, which forwards
+them to the backend's `/projects/map-analysis` endpoint. This uses the existing
+Haversine BallTree matcher across the full map dataset. Pairs must be within
+25 miles and 365 days when both dates are exact; year-only records must share
+the same published year. Unknown schedules are reported separately and never
+highlighted as confirmed matches. These are planning candidates, not proof of
+physical overlap. The legacy six-pair similarity dataset is not used by the map.
+
+For local map development, run the backend from the repository root:
+
+```powershell
+backend\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8002
+```
+
+The matching endpoint needs the optional dependencies in
+`backend/requirements-projectdata.txt`. It does not require Snowflake credentials
+or an AI model; it analyzes the supplied coordinates and schedules without
+persisting them. Reviewed PDF records go through the same matching endpoint.
+PDF text extraction still happens locally in the browser.
+
+The schedule planner on `/budget` offers Current plan and Proposed plan views in the same
+map. Before generating a proposal, choose the overlap window and maximum moves
+earlier/later (calendar years or exact-date days). Limits apply to every project;
+all records of one project move together. Unknown schedules stay unchanged.
+Calendar-year mode compares published years, while day mode requires full ISO
+dates. The backend uses a bounded deterministic search to reduce matching pairs;
+it is not an AI recommendation or proof of a feasible/optimal construction plan.
+Original data is preserved, proposals remain in browser memory, and the review
+list shows every proposed schedule change and remaining matches.
+
 Use Node.js 24 LTS. From the repository root:
 
 ```powershell
@@ -22,7 +66,7 @@ Email/Password in Firebase Authentication. Open
 http://127.0.0.1:5173. Anyone can create an account at `/signup`; Firebase sends
 an email verification link, and `/dashboard`, `/budget`, and `/profile` stay
 server-protected until the address is verified. The profile displays the real
-Firebase name and email while organization, role, maps, and budget analysis stay
+Firebase name and email while organization, role, and budget analysis stay
 labeled as previews.
 
 Keep `BACKEND_URL` empty to use the explicitly labeled example dashboard:
@@ -41,7 +85,7 @@ BACKEND_URL=http://127.0.0.1:8000
 BACKEND_AUTH=none
 ```
 
-File selection accepts up to five PDF/PNG/JPG files, 20 MB each. Files stay in browser memory, are cleared when leaving the page, and are not uploaded or processed. Maps and budget analysis intentionally remain placeholders.
+File selection accepts up to five PDF/PNG/JPG files, 20 MB each. Files stay in browser memory, are cleared when leaving the page, and are not uploaded or processed. The dashboard map shows a static reference dataset of project locations; budget analysis intentionally remains a placeholder.
 
 For production:
 
@@ -123,6 +167,12 @@ uvicorn. Production and preview setup, IAM bindings, environment variables, and
 smoke tests are in [the setup runbook](docs/FIREBASE_VERCEL_SETUP.md).
 
 ## Validation and deployment
+
+### Gemini planning responses
+
+The budget page's Generate summary button sends the question and selected project to the server-only `/api/budget-response` route. Generate proposal first runs the existing schedule analysis, then asks Gemini to explain the computed counts, preferences, and up to 50 schedule changes. The planner still analyzes the full dataset; selecting a map point does not limit its scope. Gemini does not apply changes or produce verified cost estimates.
+
+Set `GEMINI_API_KEY` in the ignored `.env.local` file (or the frontend hosting environment), then restart Next.js. `GOOGLE_API_KEY` is also supported. Optionally set `GEMINI_MODEL`; it defaults to `gemini-flash-latest`. Never prefix these secrets with `NEXT_PUBLIC_` or commit them. Requests use Google's [generateContent API](https://ai.google.dev/api/generate-content) directly, independently of the Python ADK diagnosis agents. Without a key, the response panel displays a configuration error rather than example AI output. Production requires sign-in; the existing development-only local preview is supported. Requests are limited to 25 per minute per server instance, with provider quotas applying separately.
 
 ```powershell
 npm run lint

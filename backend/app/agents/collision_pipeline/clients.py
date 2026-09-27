@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import uuid4
 
 from backend.app.schemas.diagnosis import DiagnosisDecision, DiagnosisInput
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -48,11 +51,14 @@ class InProcessDiagnosisClient:
                 for part in getattr(content, "parts", None) or []:
                     if isinstance(getattr(part, "text", None), str):
                         text = part.text
-        except Exception:
+        except Exception as exc:
+            # Class name only: exception messages may echo credentials or model text.
+            logger.warning("diagnosis model call failed; using rule-only fallback (%s)", type(exc).__name__)
             return DiagnosisClientResult(None)
         try:
             return DiagnosisClientResult(DiagnosisDecision.model_validate_json(text or ""))
         except Exception:
+            logger.warning("diagnosis model returned missing or invalid JSON; using rule-only fallback")
             return DiagnosisClientResult(None)
 
 

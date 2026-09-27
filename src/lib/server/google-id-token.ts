@@ -3,15 +3,17 @@ import "server-only";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { ExternalAccountClient, Impersonated } from "google-auth-library";
 import type { GoogleOidcBackendConfig } from "../backend-config";
+import { createIdTokenCache } from "../id-token-cache";
 
-type CachedToken = { key: string; token: string; refreshAt: number };
-let cachedToken: CachedToken | null = null;
-let pendingToken: { key: string; promise: Promise<string> } | null = null;
+// Refresh five minutes before the token expires.
+const tokenCache = createIdTokenCache((token) => tokenExpiry(token) - 300);
 
-/** Drop the cached token, e.g. after Cloud Run rejects it following an IAM change. */
+/**
+ * Drop the cached token after Cloud Run rejects it (401/403) so the next
+ * request mints a fresh one. A new token does not fix missing invoker IAM.
+ */
 export function invalidateGoogleIdToken(): void {
-  cachedToken = null;
-  pendingToken = null;
+  tokenCache.invalidate();
 }
 
 function tokenExpiry(token: string): number {
@@ -63,19 +65,5 @@ export async function getGoogleIdToken(
     config.serviceAccountEmail,
   ].join("|");
   const now = Math.floor(Date.now() / 1000);
-  if (cachedToken?.key === key && cachedToken.refreshAt > now) {
-    return cachedToken.token;
-  }
-  if (pendingToken?.key === key) return pendingToken.promise;
-
-  const promise = mintToken(config).then((token) => {
-    cachedToken = { key, token, refreshAt: tokenExpiry(token) - 300 };
-    return token;
-  });
-  pendingToken = { key, promise };
-  try {
-    return await promise;
-  } finally {
-    if (pendingToken?.promise === promise) pendingToken = null;
-  }
+  return tokenCache.get(key, now, () => mintToken(config));
 }

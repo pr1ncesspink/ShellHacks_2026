@@ -1,12 +1,29 @@
 """Upload plans and retrieve the resulting Snowflake collision dataset."""
 
 from pathlib import Path
+import re
 from tempfile import TemporaryDirectory
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
+from backend.app.api.deps import get_upload_diagnosis_service
+from backend.app.schemas.diagnosis import DiagnoseRequest, UploadDiagnosisResult
+from backend.projectdata.diagnosis import UploadDiagnosisService
+
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def validated_collision_ids(upload_id: str, overlap_id: str) -> tuple[str, str]:
+    from backend.projectdata.storage import validate_upload_id
+
+    try:
+        validate_upload_id(upload_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    if not re.fullmatch(r"COL_[a-f0-9]{24}", overlap_id):
+        raise HTTPException(422, "Invalid overlap_id")
+    return upload_id, overlap_id
 
 
 def get_project_store():
@@ -69,3 +86,29 @@ def upload_collisions(upload_id: str, offset: int = Query(0, ge=0),
         raise HTTPException(404, "Upload not found or processing did not complete") from None
     except SnowflakeError:
         raise HTTPException(502, "Snowflake collision retrieval failed") from None
+
+
+@router.post("/uploads/{upload_id}/collisions/{overlap_id}/diagnosis", response_model=UploadDiagnosisResult)
+async def diagnose_upload_collision(
+    ids: tuple[str, str] = Depends(validated_collision_ids), _: DiagnoseRequest | None = None,
+    store=Depends(get_project_store), service: UploadDiagnosisService = Depends(get_upload_diagnosis_service),
+) -> UploadDiagnosisResult:
+    from fastapi.concurrency import run_in_threadpool
+    from backend.documentparsing.snowflake import SnowflakeError
+
+    upload_id, overlap_id = ids
+    # Snowflake reads and MiniLM encoding are blocking; keep them off the event loop.
+    try:
+        collision = await run_in_threadpool(store.collision, upload_id, overlap_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    except LookupError:
+        raise HTTPException(404, "Upload not found, processing did not complete, or unknown collision") from None
+    except SnowflakeError:
+        raise HTTPException(502, "Snowflake collision retrieval failed") from None
+    try:
+        prepared = await run_in_threadpool(service.prepare, collision)
+    except (KeyError, TypeError, ValueError):
+        # Malformed stored data is a server-side fault; do not echo stored values.
+        raise HTTPException(502, "Stored collision record is invalid") from None
+    return await service.diagnose(upload_id, collision, prepared)

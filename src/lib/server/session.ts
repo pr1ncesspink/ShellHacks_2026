@@ -3,8 +3,9 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE, safeNext } from "../session";
-import { verifyUser } from "./firebase-admin";
+import { verifyUser } from "./verify-firebase-token";
 import type { SessionUser } from "../session-exchange";
+import { isLocalPreview } from "./local-preview";
 
 export async function getUser(): Promise<SessionUser | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
@@ -25,6 +26,9 @@ export async function getUser(): Promise<SessionUser | null> {
 }
 
 export async function requireUser(nextPath: string): Promise<SessionUser> {
+  if (await isLocalPreview()) {
+    return { uid: "local-design-preview", name: "Design preview", email: "preview@example.test", emailVerified: true, exp: Math.floor(Date.now() / 1000) + 3600 };
+  }
   const user = await getUser();
   if (!user) {
     redirect(`/?next=${encodeURIComponent(safeNext(nextPath))}`);

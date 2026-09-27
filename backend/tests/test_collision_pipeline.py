@@ -104,3 +104,111 @@ def test_actual_adk_malformed_output_falls_back_to_rule_only(fake_encoder, model
     assert envelope.status == "rule_only"
     assert envelope.overridden is True
     assert stub.calls == 1
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class SequenceClient:
+    def __init__(self, *results):
+        self.results = list(results)
+        self.calls = 0
+
+    async def diagnose(self, diagnosis_input):
+        self.calls += 1
+        return self.results[min(self.calls, len(self.results)) - 1]
+
+
+MODEL_RESULT = DiagnosisClientResult(DiagnosisDecision(verdict="RESEQUENCE", rationale="Shift work."))
+
+
+def clocked_pipeline(fake_encoder, client, clock):
+    return CollisionPipeline(
+        SnowflakeExportSource(FIXTURE), lambda: fake_encoder, client, Thresholds(), "stub-model", "diag.v2",
+        clock=clock,
+    )
+
+
+def test_rule_only_expires_after_ttl_then_model_result_is_used(fake_encoder):
+    clock = FakeClock()
+    client = SequenceClient(DiagnosisClientResult(None), MODEL_RESULT)
+    subject = clocked_pipeline(fake_encoder, client, clock)
+    first = asyncio.run(subject.diagnose("OVL_2"))
+    assert first.status == "rule_only" and client.calls == 1
+    clock.now += 29.9
+    within = asyncio.run(subject.diagnose("OVL_2"))
+    assert within.cached is True and within.status == "rule_only" and client.calls == 1
+    clock.now += 0.1
+    second = asyncio.run(subject.diagnose("OVL_2"))
+    assert client.calls == 2
+    assert second.status == "model" and second.cached is False
+    assert second.input_hash == first.input_hash
+
+
+def test_model_result_stays_cached_after_ttl(fake_encoder):
+    clock = FakeClock()
+    client = SequenceClient(MODEL_RESULT, DiagnosisClientResult(None))
+    subject = clocked_pipeline(fake_encoder, client, clock)
+    asyncio.run(subject.diagnose("OVL_2"))
+    clock.now += 10_000
+    again = asyncio.run(subject.diagnose("OVL_2"))
+    assert again.cached is True and again.status == "model"
+    assert client.calls == 1
+
+
+def test_reload_clears_failure_expiry(fake_encoder):
+    subject = clocked_pipeline(fake_encoder, SequenceClient(DiagnosisClientResult(None)), FakeClock())
+    asyncio.run(subject.diagnose("OVL_2"))
+    assert subject._failure_expiry
+    subject.reload()
+    assert subject._failure_expiry == {} and subject._cache == {}
+
+
+def test_run_diagnosis_without_failure_expiry_does_not_cache_rule_only(fake_encoder):
+    from backend.app.agents.collision_pipeline.pipeline import run_diagnosis
+
+    client = SequenceClient(DiagnosisClientResult(None), MODEL_RESULT)
+    subject = pipeline(fake_encoder, client)
+    diagnosis_input, eligible = subject._input("OVL_2")
+    cache, locks = {}, {}
+
+    async def run():
+        return await run_diagnosis(
+            diagnosis_input, eligible, overlap_id="OVL_2", client=client, thresholds=Thresholds(),
+            model_id="stub-model", prompt_version="diag.v2", cache=cache, locks=locks,
+        )
+
+    first = asyncio.run(run())
+    assert first.status == "rule_only" and cache == {}
+    second = asyncio.run(run())
+    assert second.status == "model" and client.calls == 2
+    assert len(cache) == 1
+
+
+def test_model_failure_logs_class_name_only(caplog):
+    class Session:
+        id = "session"
+
+    class SessionService:
+        async def create_session(self, **kwargs):
+            return Session()
+
+    class RaisingRunner:
+        session_service = SessionService()
+
+        async def run_async(self, **kwargs):
+            raise RuntimeError("SECRET-SENTINEL")
+            yield  # pragma: no cover
+
+    client = InProcessDiagnosisClient(get_settings(), agent=object(), runner=RaisingRunner())
+    fake_input = type("Input", (), {"model_dump_json": lambda self: "{}"})()
+    with caplog.at_level("WARNING", logger="backend.app.agents.collision_pipeline.clients"):
+        result = asyncio.run(client.diagnose(fake_input))
+    assert result.decision is None and result.status == "model"
+    assert "RuntimeError" in caplog.text
+    assert "SECRET-SENTINEL" not in caplog.text

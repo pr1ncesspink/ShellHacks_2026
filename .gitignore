@@ -10,6 +10,7 @@ __pycache__/
 # Generated outputs
 backend/pdfparsing/outputs/
 backend/documentparsing/outputs/
+/tmp/
 
 # Secrets and local env
 .env
@@ -35,6 +36,7 @@ out/
 next-env.d.ts
 .env*
 !.env.example
+!backend/.env.snowflake.example
 *.local
 
 # Editor directories and files
@@ -47,3 +49,7 @@ next-env.d.ts
 *.njsproj
 *.sln
 *.sw?
+
+# Generated map and PDF workers
+/public/maplibre/
+/public/pdfjs/

@@ -152,6 +152,26 @@ svg {
   align-self: stretch;
   align-items: stretch;
 }
+@media (min-width: 801px) {
+  .header-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+  .header-inner > .brand {
+    justify-self: start;
+  }
+  .header-inner > .profile-area {
+    justify-self: end;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .header-inner .profile-copy {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
 .main-nav a {
   display: flex;
   align-items: center;
@@ -432,6 +452,9 @@ svg {
   grid-template-columns: 1fr 1.08fr;
   gap: 24px;
   align-items: stretch;
+}
+.budget-grid {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
 }
 .stats-column,
 .budget-column {
@@ -883,7 +906,6 @@ svg {
   font-size: 12px;
   line-height: 1.8;
   color: #8a9597;
-  cursor: not-allowed;
 }
 .budget-input textarea::placeholder {
   color: #8a9597;
@@ -903,9 +925,8 @@ svg {
 }
 .budget-action button {
   font-size: 11px;
-  background: #26384c;
-  color: #8a9597;
-  opacity: 1;
+  background: #1d84f5;
+  color: #fff;
 }
 .budget-response {
   flex: 1;

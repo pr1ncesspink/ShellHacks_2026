@@ -1,5 +1,3 @@
-"use client";
-
 export async function postSession(
   idToken: string,
   signal?: AbortSignal,

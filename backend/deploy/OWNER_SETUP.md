@@ -106,6 +106,123 @@ The commented runtime values in `cloudrun.env.example` document this contract;
 `cloudrun.sh` does not forward them from that file. A human must configure the
 live runtime environment and run deployment for these settings to take effect.
 
+## Runtime secrets and Gemini (human-run)
+
+The service reaches Snowflake with a programmatic access token (PAT) stored in
+Secret Manager, and reaches Gemini through Vertex AI with the Cloud Run runtime
+service account (Application Default Credentials). There is no Gemini API key,
+and the PAT never appears in `cloudrun.env`, a command line, or deploy output.
+Every command below is run by a human with owner-level access; agents do not
+create secrets, service accounts, or IAM bindings.
+
+Set these once per shell (`DEPLOYER_EMAIL` is the Google account in the
+`shellhacks` gcloud configuration):
+
+```bash
+PROJECT=shellhacks-2026
+RUNTIME_SA=shellhacks-api-runtime@shellhacks-2026.iam.gserviceaccount.com
+DEPLOYER_EMAIL=replace-with-deployer@gmail.com
+```
+
+1. Enable the Secret Manager and Vertex AI APIs (`cloudrun.sh setup` also does
+   this when `SNOWFLAKE_TOKEN_SECRET` or `GEMINI_BACKEND=vertex` is set):
+
+   ```bash
+   gcloud --configuration=shellhacks --project=shellhacks-2026 services enable secretmanager.googleapis.com aiplatform.googleapis.com
+   ```
+
+2. Create the dedicated runtime service account:
+
+   ```bash
+   gcloud --configuration=shellhacks --project=shellhacks-2026 iam service-accounts create shellhacks-api-runtime --display-name="shellhacks-api runtime"
+   ```
+
+3. Create the secret that holds the Snowflake PAT:
+
+   ```bash
+   gcloud --configuration=shellhacks --project=shellhacks-2026 secrets create snowflake-pat --replication-policy=automatic
+   ```
+
+4. Add the PAT as a secret version without echoing it or leaving it in shell
+   history. The value must not end with a newline.
+
+   Git Bash (reads from the terminal silently, then streams through stdin):
+
+   ```bash
+   read -rs -p "Snowflake PAT: " SNOWFLAKE_PAT_INPUT; echo
+   printf '%s' "${SNOWFLAKE_PAT_INPUT}" | gcloud --configuration=shellhacks --project=shellhacks-2026 secrets versions add snowflake-pat --data-file=-
+   unset SNOWFLAKE_PAT_INPUT
+   ```
+
+   PowerShell (a PowerShell pipe to a native program appends a newline, so the
+   value goes through a short-lived file written without one):
+
+   ```powershell
+   $sec = Read-Host -AsSecureString "Snowflake PAT"
+   $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+   $tmp = New-TemporaryFile
+   try {
+     [IO.File]::WriteAllText($tmp.FullName, [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr))
+     gcloud --configuration=shellhacks --project=shellhacks-2026 secrets versions add snowflake-pat --data-file="$($tmp.FullName)"
+   } finally {
+     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+     Remove-Item -Force $tmp.FullName
+     Remove-Variable sec, bstr
+   }
+   ```
+
+5. Let the runtime service account read only that secret, and call Vertex AI:
+
+   ```bash
+   gcloud --configuration=shellhacks --project=shellhacks-2026 secrets add-iam-policy-binding snowflake-pat --member="serviceAccount:${RUNTIME_SA}" --role=roles/secretmanager.secretAccessor
+   gcloud --configuration=shellhacks --project=shellhacks-2026 projects add-iam-policy-binding shellhacks-2026 --member="serviceAccount:${RUNTIME_SA}" --role=roles/aiplatform.user
+   ```
+
+6. Let the deployer attach the runtime service account to the service:
+
+   ```bash
+   gcloud --configuration=shellhacks --project=shellhacks-2026 iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" --member="user:${DEPLOYER_EMAIL}" --role=roles/iam.serviceAccountUser
+   ```
+
+7. In the local-only `backend/deploy/cloudrun.env`, uncomment the opt-in block
+   from `cloudrun.env.example` (`SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`,
+   `SNOWFLAKE_WAREHOUSE=COMPUTE_WH`, `SNOWFLAKE_ROLE=SYSADMIN`,
+   `SNOWFLAKE_TOKEN_SECRET=snowflake-pat`, `GEMINI_BACKEND=vertex`,
+   `GOOGLE_CLOUD_LOCATION=global`, `DIAGNOSIS_MODEL=gemini-3.1-flash-lite`,
+   `CLOUDRUN_SERVICE_ACCOUNT=shellhacks-api-runtime@shellhacks-2026.iam.gserviceaccount.com`).
+   Never add `SNOWFLAKE_TOKEN`. Then dry-run and deploy:
+
+   ```bash
+   bash backend/deploy/cloudrun.sh --dry-run deploy
+   bash backend/deploy/cloudrun.sh deploy
+   ```
+
+   The dry run must still show `--no-allow-unauthenticated`, plus
+   `--update-env-vars=...`, `--update-secrets=SNOWFLAKE_TOKEN=snowflake-pat:latest`,
+   and `--service-account=shellhacks-api-runtime@...`. It must not show the PAT.
+   `cloudrun.sh` refuses incomplete Snowflake settings, bad secret names or
+   versions, values containing commas or newlines, `GEMINI_BACKEND` other than
+   `vertex`, and a `GOOGLE_CLOUD_PROJECT` other than `GCP_PROJECT_ID` (for
+   example the Firebase project `shellhacks26-c78d4`) before calling gcloud.
+
+Runtime troubleshooting:
+
+- `403`/`PERMISSION_DENIED` on `secretmanager.versions.access` (deploy fails or
+  the revision does not start): step 5's `roles/secretmanager.secretAccessor`
+  binding on `snowflake-pat` is missing, or the service is not running as
+  `shellhacks-api-runtime` (check `CLOUDRUN_SERVICE_ACCOUNT`).
+- An `actAs` / `iam.serviceAccounts.actAs` error during deploy: step 6 is missing.
+- `403` naming `aiplatform.endpoints.predict` in the revision logs: the runtime
+  service account lacks `roles/aiplatform.user`, or the Vertex AI API is not
+  enabled. Diagnoses then fall back to `rule_only`.
+- Vertex `404 NOT_FOUND` for the model: `DIAGNOSIS_MODEL` must be the short
+  name (`gemini-3.1-flash-lite`, not `publishers/google/models/...`) and must be
+  available in `GOOGLE_CLOUD_LOCATION` (`global`).
+- Snowflake error `390432` (network policy is required for PAT): the Snowflake
+  user needs an authentication policy that allows PATs without a network policy
+  (the current user already has one), or a network policy that admits Cloud Run
+  egress. Changing Snowflake network policy is an owner decision.
+
 ## Troubleshooting
 
 - `PERMISSION_DENIED` naming `run.services.create` or `setIamPolicy` means the

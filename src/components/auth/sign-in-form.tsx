@@ -6,6 +6,7 @@ import { ArrowRight, Fingerprint, LockKeyhole, ShieldCheck } from "lucide-react"
 import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signOut,
 } from "firebase/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,7 +51,13 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
         return;
       }
       const token = await credential.user.getIdToken(true);
-      await postSession(token);
+      try {
+        await postSession(token);
+      } catch (sessionError) {
+        // Do not leave the client signed in without a server session.
+        await signOut(auth).catch(() => undefined);
+        throw sessionError;
+      }
       window.location.replace(nextPath);
     } catch (caught) {
       setError(authErrorMessage(caught, "sign-in"));
@@ -62,12 +69,17 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
 
   async function handlePasswordReset() {
     if (resetBusy) return;
+    setNotice("");
+    if (!email.trim()) {
+      setError("Enter your email to reset your password.");
+      document.getElementById("email")?.focus();
+      return;
+    }
     setResetBusy(true);
     setError("");
-    setNotice("");
     try {
       const auth = await getFirebaseAuth();
-      if (email.trim()) await sendPasswordResetEmail(auth, email.trim());
+      await sendPasswordResetEmail(auth, email.trim());
     } catch {
       // Always use the same response so account existence is never disclosed.
     } finally {

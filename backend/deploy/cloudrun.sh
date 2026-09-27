@@ -24,6 +24,10 @@ for identity_override in \
   }
 done
 unset CLOUDSDK_ACTIVE_CONFIG_NAME CLOUDSDK_CORE_PROJECT CLOUDSDK_CORE_ACCOUNT
+# Secret values are never read, printed, or forwarded. SNOWFLAKE_TOKEN reaches
+# Cloud Run only as a Secret Manager reference (SNOWFLAKE_TOKEN_SECRET), and
+# Gemini runs on Vertex AI through the runtime service account (no API key).
+unset SNOWFLAKE_TOKEN GOOGLE_API_KEY GEMINI_API_KEY
 
 GCP_REGION="${GCP_REGION:-us-east1}"
 SERVICE_NAME="${SERVICE_NAME:-shellhacks-api}"
@@ -42,6 +46,27 @@ fi
 DRY_RUN=0
 GCLOUD_ACCOUNT=""
 
+# Opt-in runtime configuration. Only these non-secret names are forwarded with
+# --update-env-vars, and only when non-empty.
+RUNTIME_ENV_ALLOWLIST=(
+  SNOWFLAKE_ACCOUNT
+  SNOWFLAKE_USER
+  SNOWFLAKE_WAREHOUSE
+  SNOWFLAKE_ROLE
+  SNOWFLAKE_DATABASE
+  SNOWFLAKE_SCHEMA
+  SNOWFLAKE_STAGE
+  SNOWFLAKE_STATEMENT_TIMEOUT
+  GRIDLOCK_REFERENCE_DATABASE
+  GRIDLOCK_UPLOAD_DATABASE
+  GRIDLOCK_DATA_SCHEMA
+  DIAGNOSIS_MODEL
+)
+RUNTIME_ENV=()
+RUNTIME_SECRETS=()
+RUNTIME_SERVICE_ACCOUNT=""
+SETUP_EXTRA_APIS=()
+
 usage() {
   printf '%s\n' "Usage: $0 [--dry-run] {login|setup|deploy|url}" >&2
 }
@@ -57,13 +82,86 @@ require_target() {
   [[ "${DEPLOY_PUBLIC}" == "0" || "${DEPLOY_PUBLIC}" == "1" ]] || fail "CLOUDRUN_PUBLIC (or PUBLIC) must be 0 or 1."
 }
 
+check_runtime_value() {
+  local name="$1" value="$2"
+  [[ "${value}" != *,* ]] || fail "${name} must not contain a comma."
+  [[ "${value}" != *[$'\n\r']* ]] || fail "${name} must not contain a newline."
+}
+
+build_runtime_config() {
+  local name value
+  RUNTIME_ENV=()
+  RUNTIME_SECRETS=()
+  RUNTIME_SERVICE_ACCOUNT=""
+  SETUP_EXTRA_APIS=()
+
+  if [[ -n "${GOOGLE_CLOUD_PROJECT:-}" && "${GOOGLE_CLOUD_PROJECT}" != "${GCP_PROJECT_ID}" ]]; then
+    fail "GOOGLE_CLOUD_PROJECT must equal GCP_PROJECT_ID '${GCP_PROJECT_ID}' (or be unset); Vertex AI runs in the Cloud Run project."
+  fi
+
+  # Snowflake is all-or-nothing: any Snowflake setting requires the account,
+  # user, warehouse, and the Secret Manager name holding the PAT.
+  local snowflake_requested=0
+  for name in SNOWFLAKE_ACCOUNT SNOWFLAKE_USER SNOWFLAKE_WAREHOUSE SNOWFLAKE_ROLE SNOWFLAKE_DATABASE \
+    SNOWFLAKE_SCHEMA SNOWFLAKE_STAGE SNOWFLAKE_STATEMENT_TIMEOUT SNOWFLAKE_TOKEN_SECRET SNOWFLAKE_TOKEN_SECRET_VERSION; do
+    [[ -z "${!name:-}" ]] || snowflake_requested=1
+  done
+  if (( snowflake_requested )); then
+    for name in SNOWFLAKE_ACCOUNT SNOWFLAKE_USER SNOWFLAKE_WAREHOUSE SNOWFLAKE_TOKEN_SECRET; do
+      [[ -n "${!name:-}" ]] || fail "incomplete Snowflake configuration: ${name} is required when any Snowflake setting is present (SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_WAREHOUSE, SNOWFLAKE_TOKEN_SECRET)."
+    done
+    [[ "${SNOWFLAKE_TOKEN_SECRET}" =~ ^[A-Za-z0-9_-]{1,255}$ ]] || fail "SNOWFLAKE_TOKEN_SECRET must be a Secret Manager secret name (letters, digits, '_' or '-', 1-255 characters)."
+    local secret_version="${SNOWFLAKE_TOKEN_SECRET_VERSION:-latest}"
+    [[ "${secret_version}" =~ ^(latest|[0-9]+)$ ]] || fail "SNOWFLAKE_TOKEN_SECRET_VERSION must be 'latest' or a version number."
+    RUNTIME_SECRETS+=("SNOWFLAKE_TOKEN=${SNOWFLAKE_TOKEN_SECRET}:${secret_version}")
+    SETUP_EXTRA_APIS+=(secretmanager.googleapis.com)
+  fi
+
+  for name in "${RUNTIME_ENV_ALLOWLIST[@]}"; do
+    value="${!name:-}"
+    [[ -n "${value}" ]] || continue
+    check_runtime_value "${name}" "${value}"
+    RUNTIME_ENV+=("${name}=${value}")
+  done
+
+  case "${GEMINI_BACKEND:-}" in
+    "") ;;
+    vertex)
+      [[ -n "${GOOGLE_CLOUD_LOCATION:-}" ]] || fail "GOOGLE_CLOUD_LOCATION is required when GEMINI_BACKEND=vertex (for example, global)."
+      [[ "${GOOGLE_CLOUD_LOCATION}" =~ ^[a-z0-9-]{1,63}$ ]] || fail "GOOGLE_CLOUD_LOCATION must be a Vertex AI location such as global or us-east1."
+      RUNTIME_ENV+=(
+        "GOOGLE_GENAI_USE_VERTEXAI=TRUE"
+        "GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID}"
+        "GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION}"
+      )
+      SETUP_EXTRA_APIS+=(aiplatform.googleapis.com)
+      ;;
+    *) fail "GEMINI_BACKEND must be empty or 'vertex'; the Gemini API-key path is not supported for Cloud Run." ;;
+  esac
+
+  if [[ -n "${CLOUDRUN_SERVICE_ACCOUNT:-}" ]]; then
+    [[ "${CLOUDRUN_SERVICE_ACCOUNT}" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.iam\.gserviceaccount\.com$ ]] || fail "CLOUDRUN_SERVICE_ACCOUNT must be a service-account email ending in .iam.gserviceaccount.com."
+    RUNTIME_SERVICE_ACCOUNT="${CLOUDRUN_SERVICE_ACCOUNT}"
+  fi
+}
+
+join_by_comma() {
+  local IFS=,
+  printf '%s' "$*"
+}
+
 gcloud_cmd() {
   gcloud --configuration="${GCLOUD_CONFIG}" --project="${GCP_PROJECT_ID}" "$@"
 }
 
 print_command() {
+  local arg quoted
   printf '+'
-  printf ' %q' "$@"
+  for arg in "$@"; do
+    printf -v quoted '%q' "${arg}"
+    # A comma is not special to the shell; print env/secret lists readably.
+    printf ' %s' "${quoted//\\,/,}"
+  done
   printf '\n'
 }
 
@@ -149,6 +247,9 @@ main() {
   [[ $# -eq 1 ]] || { usage; exit 2; }
   local command="$1"
   require_target
+  if [[ "${command}" == "setup" || "${command}" == "deploy" ]]; then
+    build_runtime_config
+  fi
   cd "${REPO_ROOT}"
 
   case "${command}" in
@@ -163,13 +264,14 @@ main() {
       run_gcloud config set project "${GCP_PROJECT_ID}"
       ;;
     setup)
+      local apis=(run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com ${SETUP_EXTRA_APIS[@]+"${SETUP_EXTRA_APIS[@]}"})
       if (( DRY_RUN )); then
-        run_gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
+        run_gcloud services enable "${apis[@]}"
         run_gcloud artifacts repositories describe "${AR_REPO}" --location="${GCP_REGION}"
         run_gcloud artifacts repositories create "${AR_REPO}" --repository-format=docker --location="${GCP_REGION}"
       else
         verify_configuration
-        run_gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
+        run_gcloud services enable "${apis[@]}"
         if ! gcloud_cmd artifacts repositories describe "${AR_REPO}" --location="${GCP_REGION}" >/dev/null 2>&1; then
           run_gcloud artifacts repositories create "${AR_REPO}" --repository-format=docker --location="${GCP_REGION}"
         fi
@@ -188,6 +290,15 @@ main() {
         deploy_args+=(--no-allow-unauthenticated)
       else
         deploy_args+=(--allow-unauthenticated)
+      fi
+      if (( ${#RUNTIME_ENV[@]} )); then
+        deploy_args+=(--update-env-vars="$(join_by_comma "${RUNTIME_ENV[@]}")")
+      fi
+      if (( ${#RUNTIME_SECRETS[@]} )); then
+        deploy_args+=(--update-secrets="$(join_by_comma "${RUNTIME_SECRETS[@]}")")
+      fi
+      if [[ -n "${RUNTIME_SERVICE_ACCOUNT}" ]]; then
+        deploy_args+=(--service-account="${RUNTIME_SERVICE_ACCOUNT}")
       fi
       run_gcloud "${deploy_args[@]}"
       service_url="$(capture_gcloud run services describe "${SERVICE_NAME}" --region="${GCP_REGION}" --format='value(status.url)')"

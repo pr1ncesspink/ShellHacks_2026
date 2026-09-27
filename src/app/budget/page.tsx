@@ -7,89 +7,36 @@ import {
   PageHeading,
   WorkspaceFooter,
 } from "@/components/workspace";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { requireUser } from "@/lib/server/session";
+import { BudgetConversation } from "@/components/budget-conversation";
+import { ProjectMap } from "@/components/project-map";
+import points from "@/data/project-locations.json";
+import "@/components/budget-planner.css";
 
 export const metadata = { title: "Budget Summary" };
-export default async function BudgetPage() {
-  const user = await requireUser("/budget");
+export default async function BudgetPage({ searchParams }: { searchParams: Promise<{ project?: string | string[] }> }) {
+  const params = await searchParams;
+  const project = typeof params.project === "string" ? points.find(p => p.record_id === params.project) : undefined;
+  const user = await requireUser(project ? `/budget?project=${encodeURIComponent(project.record_id)}` : "/budget");
   return (
     <>
       <SiteHeader active="budget" user={user} />
       <main id="main-content" className="workspace">
         <PageHeading budget />
-        <div className="budget-intro">
-          <div>
-            <strong>A space for better-informed budgets.</strong>
-            <p>Connect your project context to future cost insights.</p>
-          </div>
-          <Badge variant="outline" className="muted-badge">
-            DESIGN PREVIEW
-          </Badge>
-        </div>
         <div className="budget-grid">
           <section
             className="budget-column"
-            aria-label="Budget input and response placeholders"
+            aria-label="Budget planning and responses"
           >
-            <Card className="budget-input panel">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">01 / YOUR QUESTION</span>
-                  <h2>Start with the context</h2>
-                </div>
-              </div>
-              <label htmlFor="budget-prompt">
-                What would you like to understand?
-              </label>
-              <textarea
-                id="budget-prompt"
-                name="budget-prompt"
-                disabled
-                placeholder="For example, where could coordinating these projects reduce duplicate work?…"
-                rows={4}
-              />
-              <div className="budget-action">
-                <span>
-                  Input placeholder
-                </span>
-                <Button disabled>
-                  Generate summary
-                </Button>
-              </div>
-            </Card>
-            <Card className="budget-response panel">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">02 / THE PERSPECTIVE</span>
-                  <h2>Your budget summary</h2>
-                </div>
-              </div>
-              <div className="response-empty">
-                <div className="response-lines" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-                <h3>A little context. A clearer outlook.</h3>
-                <p>
-                  Your future response will appear here, with room for cost
-                  insights and coordination opportunities.
-                </p>
-                <Badge variant="outline" className="muted-badge">
-                  RESPONSE PLACEHOLDER
-                </Badge>
-              </div>
-            </Card>
+            <BudgetConversation key={project?.record_id ?? "all"} projectId={project?.record_id} />
           </section>
-          <MapPlaceholder budget />
+          <div className="budget-map-frame">
+            {project ? <ProjectMap focusedRecordId={project.record_id} navigateToBudget={false} /> : <MapPlaceholder budget />}
+          </div>
         </div>
         <p className="budget-disclaimer">
           <LockKeyhole size={14} aria-hidden="true" />
-          Budget input, analysis, and maps are visual placeholders. No estimates
-          are generated.
+          AI responses are planning suggestions. Verify project constraints and cost inputs before making decisions.
         </p>
         <WorkspaceFooter />
       </main>

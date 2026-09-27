@@ -158,7 +158,7 @@ export function SignUpForm() {
             placeholder="At least six characters…"
             minLength={6}
             aria-invalid={Boolean(error)}
-            aria-describedby={error ? "sign-up-error" : "password-help"}
+            aria-describedby={error ? "sign-up-error password-help" : "password-help"}
             required
           />
           <p id="password-help" className="auth-field-help">

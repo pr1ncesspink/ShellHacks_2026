@@ -1,8 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-const SENDER_DOMAIN = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN?.trim();
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, MailCheck, RefreshCw, ShieldCheck } from "lucide-react";
 import { sendEmailVerification, updateProfile } from "firebase/auth";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +16,8 @@ import {
   confirmVerifiedEmail,
   resendVerificationWithProfileRecovery,
 } from "@/lib/verification-flow";
+
+const SENDER_DOMAIN = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN?.trim();
 
 export function VerifyEmailPanel({
   email,
@@ -38,6 +38,31 @@ export function VerifyEmailPanel({
   const [notice, setNotice] = useState(initialNotice);
   const [profileName, setProfileName] = useState(pendingDisplayName);
   const [profileWarning, setProfileWarning] = useState("");
+  const [currentEmail, setCurrentEmail] = useState<string>();
+  const knownEmail = email || currentEmail;
+  // Once a full-page navigation starts, keep the buttons disabled.
+  const navigating = useRef(false);
+
+  useEffect(() => {
+    if (email) return;
+    let disposed = false;
+    void getFirebaseAuth()
+      .then(async (auth) => {
+        await auth.authStateReady();
+        if (!disposed && auth.currentUser?.email) {
+          setCurrentEmail(auth.currentUser.email);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [email]);
+
+  function navigate(path: string) {
+    navigating.current = true;
+    window.location.replace(path);
+  }
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -56,7 +81,7 @@ export function VerifyEmailPanel({
     try {
       const auth = await getFirebaseAuth();
       if (!auth.currentUser) {
-        window.location.replace("/");
+        navigate("/");
         return;
       }
       const user = auth.currentUser;
@@ -85,7 +110,7 @@ export function VerifyEmailPanel({
     } catch (caught) {
       setError(authErrorMessage(caught, "verification"));
     } finally {
-      setBusy(null);
+      if (!navigating.current) setBusy(null);
     }
   }
 
@@ -99,7 +124,7 @@ export function VerifyEmailPanel({
       const auth = await getFirebaseAuth();
       const user = auth.currentUser;
       if (!user) {
-        window.location.replace("/");
+        navigate("/");
         return;
       }
       const result = await confirmVerifiedEmail({
@@ -122,7 +147,7 @@ export function VerifyEmailPanel({
           ),
         onVerified: () => {
           clearVerificationEmailPending();
-          window.location.replace(nextPath);
+          navigate(nextPath);
         },
       });
       if (result === "unverified") {
@@ -133,7 +158,7 @@ export function VerifyEmailPanel({
       setError(authErrorMessage(caught, "verification"));
     } finally {
       finish();
-      setBusy(null);
+      if (!navigating.current) setBusy(null);
     }
   }
 
@@ -150,7 +175,7 @@ export function VerifyEmailPanel({
       <h2>Check your inbox.</h2>
       <p>
         We sent Firebase’s verification link
-        {email ? ` to ${email}` : " to your email address"}.
+        {knownEmail ? ` to ${knownEmail}` : " to your email address"}.
       </p>
       <div className="auth-step">
         <span className="step-number">01</span>
