@@ -13,11 +13,13 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getDashboardData } from "@/lib/backend";
 import { summarize } from "@/lib/overlaps";
+import { requireUser } from "@/lib/server/session";
 
 export const metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
-  const data = await getDashboardData();
+  const user = await requireUser("/dashboard");
+  const data = await getDashboardData(user);
   const stats = summarize(data.rows);
   const failed = data.mode === "error";
   const metrics = [
@@ -34,7 +36,7 @@ export default async function DashboardPage() {
   ];
   return (
     <>
-      <SiteHeader active="dashboard" />
+      <SiteHeader active="dashboard" user={user} />
       <main id="main-content" className="workspace">
         <PageHeading />
         <div className={`data-banner ${failed ? "error-banner" : ""}`}>

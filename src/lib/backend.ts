@@ -1,22 +1,49 @@
 import "server-only";
+import { buildBackendHeaders, readBackendConfig } from "./backend-config";
 import { exampleOverlaps, parseOverlaps, type Overlap } from "./overlaps";
+import {
+  getGoogleIdToken,
+  invalidateGoogleIdToken,
+} from "./server/google-id-token";
+import type { SessionUser } from "./session-exchange";
 
 type DashboardData = { mode: "example" | "live" | "error"; rows: Overlap[] };
-export async function getDashboardData(): Promise<DashboardData> {
-  const base = process.env.BACKEND_URL?.trim();
-  if (!base) return { mode: "example", rows: exampleOverlaps };
+export async function getDashboardData(
+  user: Pick<SessionUser, "uid">,
+): Promise<DashboardData> {
+  const config = readBackendConfig(process.env);
+  if (config.mode === "example") {
+    return { mode: "example", rows: exampleOverlaps };
+  }
+  if (config.mode === "invalid") {
+    console.error(
+      `[backend] Invalid configuration; check ${config.missing.join(", ")}`,
+    );
+    return { mode: "error", rows: [] };
+  }
   try {
-    const url = new URL(base.endsWith("/") ? base : `${base}/`);
-    if (!["https:", "http:"].includes(url.protocol))
-      throw new Error("Invalid backend protocol");
-    const response = await fetch(new URL("overlaps/similarity", url), {
-      cache: "no-store",
-      signal: AbortSignal.timeout(15000),
-      headers: { Accept: "application/json" },
-    });
+    const googleIdToken =
+      config.auth === "google-oidc"
+        ? await getGoogleIdToken(config)
+        : undefined;
+    const response = await fetch(
+      new URL("overlaps/similarity", config.url),
+      {
+        cache: "no-store",
+        signal: AbortSignal.timeout(15000),
+        headers: buildBackendHeaders(user.uid, googleIdToken),
+      },
+    );
+    if (
+      config.auth === "google-oidc" &&
+      (response.status === 401 || response.status === 403)
+    ) {
+      invalidateGoogleIdToken();
+    }
     if (!response.ok) throw new Error("Backend unavailable");
     return { mode: "live", rows: parseOverlaps(await response.json()) };
   } catch {
+    console.error("[backend] Dashboard request failed");
     return { mode: "error", rows: [] };
   }
 }

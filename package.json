@@ -10,11 +10,15 @@
     "preview": "npm run start",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/lib/overlaps.test.ts"
+    "test": "node --experimental-strip-types --test \"src/lib/**/*.test.ts\""
   },
   "dependencies": {
+    "@vercel/oidc": "^3.8.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "firebase": "^12.19.0",
+    "firebase-admin": "^14.5.0",
+    "google-auth-library": "^11.1.0",
     "lucide-react": "latest",
     "next": "^16.3.6",
     "radix-ui": "latest",
