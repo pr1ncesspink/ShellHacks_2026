@@ -152,6 +152,26 @@ svg {
   align-self: stretch;
   align-items: stretch;
 }
+@media (min-width: 801px) {
+  .header-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+  .header-inner > .brand {
+    justify-self: start;
+  }
+  .header-inner > .profile-area {
+    justify-self: end;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .header-inner .profile-copy {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
 .main-nav a {
   display: flex;
   align-items: center;
