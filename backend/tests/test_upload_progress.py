@@ -163,6 +163,57 @@ def test_reporter_conflict_disables_without_raising():
     assert stored(gcs, sid)["status"] == "failed" and "stage" not in stored(gcs, sid)
 
 
+def test_reporter_conflict_with_a_cancel_sets_cancelled():
+    gcs = FakeGcs()
+    sid, document, generation = processing_doc(gcs)
+    reporter = ProgressReporter(gcs, session_name(sid), document, generation, clock=Clock())
+    assert reporter.cancelled is False
+    gcs._put(session_name(sid), json.dumps({**document, "status": "cancelled"}).encode())
+    reporter("staging")
+    assert reporter.cancelled and not reporter.active
+    reporter("parsing")
+    assert stored(gcs, sid)["status"] == "cancelled" and "stage" not in stored(gcs, sid)
+
+    # A failed conflict re-read is swallowed and does not claim a cancel.
+    class ReadFails(FakeGcs):
+        def read_json(self, name):
+            raise GcsError("down")
+
+    gcs = ReadFails()
+    sid, document, generation = processing_doc(gcs)
+    reporter = ProgressReporter(gcs, session_name(sid), document, generation, clock=Clock())
+    gcs._put(session_name(sid), json.dumps({**document, "status": "cancelled"}).encode())
+    reporter("staging")
+    assert not reporter.cancelled and not reporter.active
+
+
+def test_reporter_never_writes_over_a_cancelled_document():
+    gcs = FakeGcs()
+    sid, document, generation = processing_doc(gcs)
+    reporter = ProgressReporter(gcs, session_name(sid), {**document, "status": "cancelled"},
+                                generation, clock=Clock())
+    reporter("saving")
+    assert [c for c in gcs.calls if c[0] == "write_json"] == []
+
+
+def test_job_stops_when_a_progress_write_finds_the_session_cancelled():
+    gcs = FakeGcs()
+    service, sid = queued(gcs)
+    summaries = []
+
+    def process(path, store, progress=None):
+        service.cancel("user_1", sid)
+        progress("saving")  # conflicts, re-reads, and flags the cancel
+        return {"upload_id": "UPL_" + "9" * 32}
+
+    status = upload_job.run(sid, gcs=gcs, config=service.config, store_factory=fake_store,
+                            process=process, summarize=lambda *a, **k: summaries.append(a))
+    assert status == "cancelled" and summaries == []
+    view = service.status("user_1", sid)
+    assert view == {"session_id": sid, "status": "cancelled", "upload_id": None,
+                    "error_code": None, "updated_at": view["updated_at"]}
+
+
 def test_reporter_exception_disables_and_close_blocks():
     class Broken(FakeGcs):
         def write_json(self, name, document, *, if_generation_match):

@@ -237,6 +237,8 @@ def test_every_agent_post_is_rejected_without_reading_body_or_calling_app(path):
     ("POST", "/collisions/a/b/diagnosis"), ("POST", "/a2a-other"),
     ("GET", "/a2a/.well-known/agent-card.json"), ("GET", "/health"),
     ("GET", "/projects/uploads/UPL_1/collisions"), ("POST", "/projects/uploads/extra"),
+    # Cancelling an upload is never rate-limited (it only ever stops paid work).
+    ("POST", "/projects/upload-sessions/SES_" + "a" * 32 + "/cancel"),
     *[(method, DIAGNOSIS_PATH) for method in ("GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE")],
 ])
 def test_outside_agent_post_surface_bypasses_exhausted_limiter(method, path):

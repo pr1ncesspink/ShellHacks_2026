@@ -6,7 +6,8 @@ ifGenerationMatch, tracking the generation each write returns so the job's final
 write can follow on from it. Progress is advisory: a lost race or any storage error logs the
 exception class only and disables the reporter; it never raises into the pipeline, never
 touches ``updated_at`` (the stale-session timeout keeps its meaning), and never writes over
-a terminal status.
+a terminal status. When a progress write loses a race, the reporter re-reads the document
+and sets ``cancelled`` if the owner cancelled the session, so the job can stop cooperatively.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ log = logging.getLogger("backend.projectdata.progress")
 
 THROTTLE_S = 5.0
 MAX_DETAIL = 100_000
-TERMINAL = ("succeeded", "failed")
+TERMINAL = ("succeeded", "failed", "cancelled")
 
 
 def stage_detail(done, total) -> dict | None:
@@ -46,6 +47,7 @@ class ProgressReporter:
         self._last_write = None
         self._disabled = False
         self._closed = False
+        self.cancelled = False
 
     @property
     def document(self) -> dict:
@@ -101,5 +103,16 @@ class ProgressReporter:
             # Someone else owns the document now (for example a terminal write): stop.
             self._disabled = True
             log.warning("progress reporting disabled: %s", PreconditionFailed.__name__)
+            self._check_cancelled()
             return
         self._document, self._generation, self._last_write = updated, generation, now
+
+    def _check_cancelled(self) -> None:
+        try:
+            current, _ = self._gcs.read_json(self._key)
+        except Exception as exc:  # noqa: BLE001 - never raises into the pipeline
+            log.warning("progress re-read failed: %s", type(exc).__name__)
+            return
+        if isinstance(current, dict) and current.get("status") == "cancelled":
+            self.cancelled = True
+            log.info("session was cancelled")

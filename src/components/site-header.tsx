@@ -1,7 +1,6 @@
 import Link from "next/link";
 import {
   CalendarRange,
-  FileText,
   LayoutDashboard,
   LogOut,
   UserRound,
@@ -15,11 +14,10 @@ export type SiteUser = {
   name: string | null;
 };
 
-export type SiteSection = "dashboard" | "summary" | "budget" | "profile";
+export type SiteSection = "dashboard" | "budget" | "profile";
 
 const NAV_ITEMS: { id: Exclude<SiteSection, "profile">; href: string; label: string; icon: LucideIcon }[] = [
   { id: "dashboard", href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "summary", href: "/summary", label: "Summary", icon: FileText },
   { id: "budget", href: "/budget", label: "Budget", icon: CalendarRange },
 ];
 

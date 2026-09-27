@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
-import { Circle, CircleCheck, CircleX, LoaderCircle, RotateCw } from "lucide-react";
+import { Ban, Circle, CircleCheck, CircleX, LoaderCircle, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -18,6 +18,7 @@ const STATE_TEXT: Record<UploadStepState, string> = {
   current: "in progress",
   pending: "not started",
   failed: "failed",
+  cancelled: "cancelled",
 };
 
 const STATE_ICON = {
@@ -25,6 +26,7 @@ const STATE_ICON = {
   current: LoaderCircle,
   pending: Circle,
   failed: CircleX,
+  cancelled: Ban,
 } satisfies Record<UploadStepState, unknown>;
 
 /**
@@ -70,6 +72,8 @@ export type UploadStepperProps = Omit<ComponentProps<"div">, "children"> & {
   onRetry?: () => void;
   /** Accessible name for the Retry button, e.g. "Retry plans.pdf". */
   retryLabel?: string;
+  /** Visible text of the Retry button; defaults to "Retry". */
+  retryText?: string;
 };
 
 /**
@@ -82,19 +86,21 @@ export function UploadStepper({
   label = "Upload steps",
   onRetry,
   retryLabel = "Retry",
+  retryText = "Retry",
   className,
   ...props
 }: UploadStepperProps) {
   const steps = uploadSteps(progress);
-  const active = steps.find((step) => step.state === "current" || step.state === "failed");
-  const running = progress.phase !== "succeeded" && progress.phase !== "failed";
-  const clock = useStepClock(active?.id ?? "done", running);
+  const active = steps.find((step) => step.state !== "done" && step.state !== "pending");
   const failed = progress.phase === "failed";
+  const cancelled = progress.phase === "cancelled";
+  const running = progress.phase !== "succeeded" && !failed && !cancelled;
+  const clock = useStepClock(active?.id ?? "done", running);
 
   return (
     <div
       data-slot="upload-stepper"
-      data-state={failed ? "failed" : running ? "running" : "done"}
+      data-state={failed ? "failed" : cancelled ? "cancelled" : running ? "running" : "done"}
       className={cn("upload-stepper", className)}
       {...props}
     >
@@ -107,7 +113,7 @@ export function UploadStepper({
               key={step.id}
               data-slot="upload-stepper-step"
               data-state={step.state}
-              aria-current={isCurrent || step.state === "failed" ? "step" : undefined}
+              aria-current={step === active ? "step" : undefined}
               className="upload-stepper-step"
             >
               <Icon
@@ -134,14 +140,14 @@ export function UploadStepper({
           {onRetry && (
             <Button variant="outline" size="touch" onClick={onRetry} aria-label={retryLabel}>
               <RotateCw size={16} aria-hidden="true" />
-              Retry
+              {retryText}
             </Button>
           )}
         </div>
       )}
       {(running || clock.total > 0) && (
         <p className="upload-stepper-total">
-          {running ? "Elapsed " : failed ? "Stopped after " : "Finished in "}
+          {running ? "Elapsed " : failed || cancelled ? "Stopped after " : "Finished in "}
           <Elapsed ms={clock.total} />
         </p>
       )}

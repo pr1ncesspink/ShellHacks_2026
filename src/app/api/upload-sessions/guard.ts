@@ -13,8 +13,8 @@ export const MAX_JSON_BODY = 1024;
 type Context = { config: LiveBackendConfig; uid: string | null };
 
 /**
- * Same guards as /api/map-analysis. Same-origin GETs may omit Origin, so a GET
- * without one is accepted only when the browser marks it same-origin.
+ * Shared guard for the upload proxy routes: same-origin, signed in (or local
+ * preview), live backend. Same-origin GETs may omit Origin, so a GET without one is accepted only when the browser marks it same-origin.
  */
 export async function guard(request: NextRequest): Promise<Context | NextResponse> {
   const origin = request.headers.get("origin");

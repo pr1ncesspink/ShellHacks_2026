@@ -79,6 +79,14 @@ def process_upload_session(response: Response, session_id: str = Depends(checked
     return payload
 
 
+@router.post("/upload-sessions/{session_id}/cancel")
+def cancel_upload_session(session_id: str = Depends(checked_session_id),
+                          owner: str = Depends(authenticated_owner),
+                          service=Depends(get_session_service)):
+    """Idempotent owner cancel; always 200 with the session view (not rate-limited)."""
+    return _call(service.cancel, owner, session_id)
+
+
 @router.get("/upload-sessions/{session_id}")
 def upload_session_status(session_id: str = Depends(checked_session_id),
                           owner: str = Depends(authenticated_owner),

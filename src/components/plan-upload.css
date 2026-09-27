@@ -1,7 +1,8 @@
 /*
- * Dashboard uploader (file-upload.tsx) and upload stepper (upload-stepper.tsx).
+ * /budget uploader (file-upload.tsx) and upload stepper (upload-stepper.tsx).
  * Theme tokens only (see :root in src/app/globals.css); no raw colours.
- * Roles: teal = done, violet = current, pink = failed, muted = pending.
+ * Roles: teal = done, violet = current, pink = failed, muted = pending and
+ * cancelled (a user choice, not an error).
  */
 
 .plan-upload {
@@ -188,6 +189,27 @@
   color: var(--destructive-text);
 }
 
+.plan-upload-item[data-state="cancelled"] .plan-upload-item-status,
+.plan-upload-item[data-cancelling] .plan-upload-item-status {
+  color: var(--muted-foreground);
+}
+
+.plan-upload-item-note {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+/* aria-disabled (not disabled) keeps focus on the button while cancelling. */
+.plan-upload-cancelling {
+  cursor: default;
+  color: var(--muted-foreground);
+}
+
+.plan-upload-cancelling:hover {
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
 .plan-upload-item-actions {
   display: flex;
   flex: none;
@@ -265,6 +287,11 @@
 .upload-stepper-step[data-state="failed"] {
   font-weight: 600;
   color: var(--destructive-text);
+}
+
+.upload-stepper-step[data-state="cancelled"] {
+  font-weight: 600;
+  color: var(--muted-foreground);
 }
 
 .upload-stepper-detail,

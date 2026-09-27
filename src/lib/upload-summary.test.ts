@@ -10,7 +10,7 @@ import {
   parseRecentUploads,
   parseUploadMap,
   parseUploadSummary,
-  summaryHref,
+  budgetHref,
   uploadApiPath,
   uploadBackendPath,
   type UploadMap,
@@ -32,9 +32,12 @@ test("parseIdList validates, dedupes and caps", () => {
   assert.deepEqual(parseIdList("", "SES_"), []);
 });
 
-test("summaryHref and paths only use valid ids", () => {
-  assert.equal(summaryHref("sessions", [ses(1), "bad", ses(2)]), `/summary?sessions=${ses(1)},${ses(2)}`);
-  assert.equal(summaryHref("uploads", ["bad"]), "/summary");
+test("budgetHref and paths only use valid ids", () => {
+  assert.equal(budgetHref("sessions", [ses(1), "bad", ses(2)]), `/budget?sessions=${ses(1)},${ses(2)}`);
+  assert.equal(budgetHref("uploads", [upl(1), ses(2), upl(2)]), `/budget?uploads=${upl(1)},${upl(2)}`);
+  assert.equal(budgetHref("uploads", ["bad"]), "/budget");
+  assert.equal(budgetHref("sessions", []), "/budget");
+  assert.equal(budgetHref("uploads", Array.from({ length: 7 }, (_, i) => upl(i + 1))).split(",").length, MAX_SUMMARY_IDS);
   assert.equal(uploadBackendPath(upl(1), "summary"), `projects/uploads/${upl(1)}/summary`);
   assert.equal(uploadBackendPath("UPL_../../x", "map"), null);
   assert.equal(uploadApiPath(upl(1), "map"), `/api/uploads/${upl(1)}/map`);

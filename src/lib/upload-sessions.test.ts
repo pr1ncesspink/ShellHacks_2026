@@ -79,7 +79,7 @@ test("parseProcessResult and parseSessionState", () => {
     "snowflake_failed",
   );
   for (const value of [
-    { ...state, status: "cancelled" },
+    { ...state, status: "stopped" },
     { ...state, status: "succeeded", upload_id: null },
     { ...state, upload_id: 42 },
     { ...state, error_code: "Traceback: boom" },
@@ -475,4 +475,115 @@ test("pollUploadSession keeps poll_failed for exhausted transient failures", asy
   await assert.rejects(pollUploadSession(ID, { onProgress: (p) => seen.push(p) }, fakeDeps([flaky, flaky, flaky])),
     { message: POLL_GAVE_UP_MESSAGE });
   assert.equal(seen.at(-1)?.errorCode, "poll_failed");
+});
+
+// ---- Cancel (HARNESS-BUDGET-CONSOLIDATION-001) ----
+import { cancelUploadSession, isTerminalStatus } from "./upload-sessions.ts";
+
+const cancelledView = { session_id: ID, status: "cancelled", upload_id: null, error_code: null, updated_at: "2026-09-27T12:21:00Z" };
+
+test("parseSessionState accepts the cancelled view (no stage keys)", () => {
+  assert.deepEqual(parseSessionState(cancelledView), { ...cancelledView, ...noStage });
+  assert.deepEqual(parseSessionState({ ...cancelledView, kind: "csv" }).kind, "csv");
+  assert.equal(parseProcessResult({ status: "cancelled" }).status, "cancelled");
+  assert.equal(SESSION_STATUS_LABELS.cancelled, "Upload cancelled.");
+  assert.equal(isTerminalStatus("cancelled"), true);
+  assert.equal(isTerminalStatus("processing"), false);
+});
+
+test("sessionProgress maps cancelled without failure fields", () => {
+  assert.deepEqual(sessionProgress("cancelled", parseSessionState(cancelledView), "pdf"), { kind: "pdf", phase: "cancelled", stage: null });
+  assert.deepEqual(sessionProgress("cancelled", null), { phase: "cancelled", stage: null });
+});
+
+test("pollUploadSession returns on cancelled and keeps the last stage seen", async () => {
+  const seen: UploadProgress[] = [];
+  const deps = fakeDeps([{ ...processing, stage: "matching" }, cancelledView]);
+  const result = await pollUploadSession(ID, { onProgress: (p) => seen.push(p) }, deps);
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.upload_id, null);
+  assert.deepEqual(seen.at(-1), { kind: "pdf", phase: "cancelled", stage: "matching" });
+  assert.equal(seen.some((p) => p.phase === "failed"), false);
+  assert.equal(deps.calls.length, 2);
+});
+
+test("runUploadSession returns cancelled when /process reports it and fires onCreated first", async () => {
+  const order: string[] = [];
+  const deps = fakeDeps([cancelledView], "cancelled");
+  const result = await runUploadSession(pdf(), {
+    onCreated: (id) => order.push(`created ${id}`),
+    onQueued: (id) => order.push(`queued ${id}`),
+  }, deps);
+  assert.equal(result.status, "cancelled");
+  assert.deepEqual(order, [`created ${ID}`, `queued ${ID}`]);
+});
+
+test("cancelUploadSession POSTs to the cancel route and parses the view", async () => {
+  const calls: Array<{ path: string; init?: { method: "POST"; signal?: AbortSignal } }> = [];
+  const controller = new AbortController();
+  const view = await cancelUploadSession(ID, { signal: controller.signal }, {
+    callApi: async (path, init) => { calls.push({ path, init }); return cancelledView; },
+  });
+  assert.equal(view.status, "cancelled");
+  assert.equal(calls[0].path, `/api/upload-sessions/${ID}/cancel`);
+  assert.equal(calls[0].init?.method, "POST");
+  assert.equal(calls[0].init?.signal, controller.signal);
+  // Already terminal: the unchanged view comes back.
+  const done = await cancelUploadSession(ID, {}, { callApi: async () => state });
+  assert.equal(done.status, "succeeded");
+});
+
+test("cancelUploadSession validates ids, views and aborts", async () => {
+  let called = 0;
+  const callApi = async () => { called += 1; return cancelledView; };
+  await assert.rejects(cancelUploadSession("SES_bad", {}, { callApi }), { message: "Invalid session_id" });
+  const other = `SES_${"b2".repeat(16)}`;
+  await assert.rejects(cancelUploadSession(other, {}, { callApi }), { message: "Invalid session_id" });
+  await assert.rejects(cancelUploadSession(ID, {}, { callApi: async () => ({ ...cancelledView, status: "stopped" }) }), { message: "Invalid status" });
+  const controller = new AbortController();
+  controller.abort();
+  called = 0;
+  await assert.rejects(cancelUploadSession(ID, { signal: controller.signal }, { callApi }), UploadCancelledError);
+  assert.equal(called, 0);
+  const rejected = new UploadApiError(404, "Upload session not found.");
+  called = 0;
+  await assert.rejects(cancelUploadSession(ID, {}, { callApi: async () => { called += 1; throw rejected; } }), (e) => e === rejected);
+  assert.equal(called, 1, "non-transient errors are not retried");
+});
+
+test("cancelUploadSession retries 502 and network failures with backoff, then gives up", async () => {
+  const flaky = new UploadApiError(502, "Upload backend unavailable. Try again shortly.");
+  const waits: number[] = [];
+  const sleep = async (ms: number) => { waits.push(ms); };
+  const replies: unknown[] = [flaky, new UploadApiError(null, GENERIC_API_ERROR), cancelledView];
+  const view = await cancelUploadSession(ID, {}, {
+    sleep,
+    callApi: async () => { const next = replies.shift(); if (next instanceof Error) throw next; return next; },
+  });
+  assert.equal(view.status, "cancelled");
+  assert.deepEqual(waits, [1_000, 2_000]);
+
+  let calls = 0;
+  await assert.rejects(cancelUploadSession(ID, {}, { sleep: async () => {}, callApi: async () => { calls += 1; throw flaky; } }),
+    (e) => e === flaky);
+  assert.equal(calls, 3);
+
+  // Aborting during the backoff stops the retries.
+  const controller = new AbortController();
+  calls = 0;
+  await assert.rejects(cancelUploadSession(ID, { signal: controller.signal }, {
+    sleep: async () => { controller.abort(); },
+    callApi: async () => { calls += 1; throw flaky; },
+  }), UploadCancelledError);
+  assert.equal(calls, 1);
+});
+
+test("callUploadApi maps an abort to UploadCancelledError", async () => {
+  const controller = new AbortController();
+  const fetchImpl = (async (_path: string, init: RequestInit) => {
+    assert.equal(init.signal, controller.signal);
+    controller.abort();
+    throw new DOMException("aborted", "AbortError");
+  }) as unknown as typeof fetch;
+  await assert.rejects(callUploadApi("/api/x", { method: "POST", signal: controller.signal }, fetchImpl), UploadCancelledError);
 });
