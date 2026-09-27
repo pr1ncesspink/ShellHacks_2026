@@ -1,107 +1,148 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { Map as LeafletMap } from "leaflet";
-import "leaflet/dist/leaflet.css";
-import points from "@/data/project-locations.json";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import defaultLocations from "@/data/project-locations.json";
+import { proximityPairs, type MapProject } from "@/lib/project-data";
 import { Card } from "@/components/ui/card";
-import { nearbyRecordIds } from "@/lib/project-proximity";
 
-const nearby = nearbyRecordIds(points);
+const key = process.env.NEXT_PUBLIC_MAPTILER_KEY;
+const style = key
+  ? `https://api.maptiler.com/maps/streets-v2/style.json?key=${encodeURIComponent(key)}`
+  : "https://tiles.openfreemap.org/styles/liberty";
 
-export function ProjectMap() {
+export function ProjectMap({ locations = defaultLocations, sourceLabel = "CSV project locations" }: { locations?: MapProject[]; sourceLabel?: string }) {
   const container = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<LeafletMap | null>(null);
-  const [message, setMessage] = useState("Loading project map…");
-  const projectCount = new Set(points.map((p) => p.project_id)).size;
+  const map = useRef<maplibregl.Map | null>(null);
+  const [selected, setSelected] = useState("");
+  const [status, setStatus] = useState("Loading map…");
+  const [attempt, setAttempt] = useState(0);
+
+  const nearbyIds = useMemo(() => new Set(proximityPairs(locations, 25).flatMap(({ a, b }) => [a.record_id, b.record_id])), [locations]);
 
   useEffect(() => {
-    let disposed = false;
-    let observer: ResizeObserver | undefined;
-    import("leaflet").then((L) => {
-      if (disposed || !container.current) return;
-      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const map = L.map(container.current, {
-        scrollWheelZoom: false, zoomAnimation: !reduced, fadeAnimation: !reduced,
+    if (!container.current) return;
+    let instance: maplibregl.Map;
+    let loaded = false;
+    const timer = window.setTimeout(() => {
+      if (!loaded) setStatus("Map is taking longer to load. Check your connection or retry.");
+    }, 20000);
+    try {
+      maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
+      instance = new maplibregl.Map({
+        container: container.current,
+        style,
+        center: [-98, 38],
+        zoom: 3,
+        attributionControl: { compact: true },
       });
-      mapRef.current = map;
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19,
-      }).on("tileerror", () => {
-        if (!disposed) setMessage("Basemap unavailable. Project markers are still shown; check your connection.");
-      }).addTo(map);
-      // Group coincident coordinates so every record remains accessible in its popup.
-      const groups = new Map<string, typeof points>();
-      for (const point of points) {
-        const key = `${point.latitude},${point.longitude}`;
-        groups.set(key, [...(groups.get(key) ?? []), point]);
+    } catch {
+      window.clearTimeout(timer);
+      // Report an external WebGL initialization failure.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStatus("The map could not start. Your browser needs WebGL enabled.");
+      return;
+    }
+    map.current = instance;
+    instance.addControl(new maplibregl.NavigationControl(), "top-right");
+    instance.addControl(new maplibregl.FullscreenControl(), "top-right");
+    instance.on("error", () => setStatus("Some map tiles could not load. Check your connection or retry."));
+    instance.on("load", () => {
+      loaded = true;
+      window.clearTimeout(timer);
+      setStatus("");
+    });
+    const bounds = new maplibregl.LngLatBounds();
+    let activePopup: maplibregl.Popup | undefined;
+    for (const project of locations) {
+      bounds.extend([project.longitude, project.latitude]);
+      const pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = nearbyIds.has(project.record_id) ? "project-map-pin is-nearby" : "project-map-pin";
+      pin.setAttribute("aria-label", `View ${project.project_name}${nearbyIds.has(project.record_id) ? ", within 25 miles of another project" : ""}`);
+
+
+      const content = document.createElement("div");
+      const heading = document.createElement("strong");
+      heading.textContent = project.project_name;
+      content.append(heading);
+      for (const text of [`Latitude: ${project.latitude.toFixed(6)}`, `Longitude: ${project.longitude.toFixed(6)}`, `Published date/year: ${project.schedule || project.estimated_in_service_year || "Not available"}`, ...(project.source_document ? [`Source: ${project.source_document}${project.source_page ? `, page ${project.source_page}` : " (manual entry)"}`] : ["Year only; exact date unavailable"]), project.owner, project.status || "Status unavailable"]) {
+        const line = document.createElement("p");
+        line.textContent = text;
+        content.append(line);
       }
-      for (const group of groups.values()) {
-        const first = group[0];
-        const isNearby = group.some((p) => nearby.has(p.record_id));
-        const tooltip = document.createElement("div");
-        tooltip.className = "project-map-tooltip-content";
-        const names = document.createElement("strong");
-        names.textContent = [...new Set(group.map((p) => p.project_name))].join(" · ");
-        const coordinates = document.createElement("div");
-        coordinates.textContent = `Latitude: ${first.latitude} · Longitude: ${first.longitude}`;
-        tooltip.append(names, coordinates);
-        for (const p of group) {
-          const date = document.createElement("div");
-          date.textContent = `${group.length > 1 ? `${p.project_name}: ` : ""}Estimated in-service year: ${p.estimated_in_service_year || "Not provided"}`;
-          tooltip.append(date);
-        }
-        const popup = document.createElement("div");
-        popup.className = "project-map-popup";
-        for (const p of group) {
-          const section = document.createElement("section");
-          const title = document.createElement("strong");
-          title.textContent = p.project_name;
-          const detail = document.createElement("p");
-          detail.textContent = `${p.owner || "Owner unspecified"} · ${p.states} · ${p.status || "Status unspecified"}`;
-          const location = document.createElement("p");
-          location.textContent = `${p.record_id} / ${p.project_id} · ${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)} · ${p.coordinate_method.replaceAll("_", " ")}`;
-          const year = document.createElement("p");
-          year.textContent = `Estimated in-service year: ${p.estimated_in_service_year || "Not provided"}`;
-          const proximity = document.createElement("p");
-          proximity.textContent = nearby.has(p.record_id) ? "Another project is within 25 miles." : "No other project within 25 miles.";
-          section.append(title, detail, year, location, proximity);
-          popup.append(section);
-        }
-        L.circleMarker([first.latitude, first.longitude], {
-          radius: 5, color: "#ffffff", weight: 1.5,
-          fillColor: isNearby ? "#f59a45" : "#1d84f5", fillOpacity: 0.9,
-        }).bindTooltip(tooltip, { direction: "top", className: "project-location-tooltip" })
-          .bindPopup(popup, { maxWidth: 300, maxHeight: 240 }).addTo(map);
-      }
-      map.fitBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]), { padding: [24, 24] });
-      observer = new ResizeObserver(() => map.invalidateSize());
-      observer.observe(container.current);
-      setMessage("");
-    }).catch(() => { if (!disposed) setMessage("The map could not load. Refresh to try again."); });
+      let popup: maplibregl.Popup | undefined;
+      const showPopup = () => {
+        activePopup?.remove();
+        popup = new maplibregl.Popup({ offset: 12, maxWidth: "300px", focusAfterOpen: false, closeOnClick: false, closeButton: false })
+          .setLngLat([project.longitude, project.latitude]).setDOMContent(content).addTo(instance);
+        activePopup = popup;
+      };
+      const hidePopup = () => popup?.remove();
+      pin.addEventListener("mouseenter", showPopup);
+      pin.addEventListener("mouseleave", hidePopup);
+      pin.addEventListener("focus", showPopup);
+      pin.addEventListener("blur", hidePopup);
+      pin.addEventListener("keydown", (event) => { if (event.key === "Escape") hidePopup(); });
+      pin.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setSelected(project.record_id);
+        showPopup();
+      });
+      new maplibregl.Marker({ element: pin })
+        .setLngLat([project.longitude, project.latitude])
+        .addTo(instance);
+    }
+    if (!bounds.isEmpty()) instance.fitBounds(bounds, { padding: 45, maxZoom: 7, duration: 0 });
+    const observer = new ResizeObserver(() => instance.resize());
+    observer.observe(container.current);
     return () => {
-      disposed = true;
-      observer?.disconnect();
-      mapRef.current?.remove();
-      mapRef.current = null;
+      window.clearTimeout(timer);
+      observer.disconnect();
+      instance.remove();
+      map.current = null;
     };
-  }, []);
+  }, [attempt, locations, nearbyIds]);
 
-  function resetView() {
-    mapRef.current?.fitBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]), { padding: [24, 24] });
-  }
-
+  const project = locations.find((item) => item.record_id === selected);
   return (
-    <Card className="map-card panel project-map-card">
+    <Card className="map-card panel">
       <div className="panel-heading">
         <div><span className="eyebrow">SPATIAL CONTEXT</span><h2>Project landscape</h2></div>
-        <button type="button" className="map-reset" onClick={resetView}>Show all</button>
+        <span className="project-map-count">{locations.length} locations</span>
       </div>
-      <div ref={container} className="project-map-canvas" role="region" aria-label={`Project location map: ${points.length} points. Use arrow keys to pan and plus or minus to zoom.`} />
-      {message && <p className="project-map-message" role="status">{message}</p>}
-      <div className="map-footer"><span>{points.length} locations · {projectCount} projects</span><span>Static reference dataset</span></div>
-      <p className="project-map-note">Orange: another project within 25 miles (inclusive). Blue: no other project within 25 miles. Hover or click for the year and details. Proximity does not confirm construction or schedule overlap.</p>
+      <div className="project-map-toolbar">
+        <label htmlFor="project-location">Find a project</label>
+        <select id="project-location" value={selected} onChange={(event) => {
+          setSelected(event.target.value);
+          const item = locations.find((row) => row.record_id === event.target.value);
+          if (item) map.current?.flyTo({ center: [item.longitude, item.latitude], zoom: 9, duration: 800 });
+        }}>
+          <option value="">Select a project location…</option>
+          {locations.map((item) => <option key={item.record_id} value={item.record_id}>{item.project_name}{item.segment ? ` — ${item.segment}` : ""} ({item.record_id})</option>)}
+        </select>
+        <div className="project-map-legend" aria-label="Map marker colors"><span><i className="nearby-swatch" />Within 25 miles of another project</span><span><i />No project within 25 miles</span></div>
+        <p className="project-map-line-note">Hover over a dot to see coordinates and the published date or year.</p>
+        <button className="project-map-reset" type="button" onClick={() => {
+          const bounds = new maplibregl.LngLatBounds();
+          locations.forEach(p => bounds.extend([p.longitude, p.latitude]));
+          if (!bounds.isEmpty()) map.current?.fitBounds(bounds, { padding: 45, maxZoom: 7, duration: 500 });
+        }}>Show all locations</button>
+      </div>
+      <div className="project-map-stage">
+        <div ref={container} className="project-map-canvas" role="region" aria-label="Interactive map of project locations" />
+        {status && <div className="project-map-status" role="status">{status} <button type="button" onClick={() => { setStatus("Loading map…"); setAttempt((value) => value + 1); }}>Retry</button></div>}
+      </div>
+      {project && <div className="project-map-details" aria-live="polite">
+        <strong>{project.project_name}</strong>
+        <span>Latitude: {project.latitude.toFixed(6)} | Longitude: {project.longitude.toFixed(6)}</span>
+        <span>Published date/year: {project.schedule || project.estimated_in_service_year || "Not available"}</span>
+        <span>{project.owner} · {project.status || "Status unavailable"}</span>
+        <span>{project.states} · {project.coordinate_method.replaceAll("_", " ")}</span>
+        {/^https?:\/\//.test(project.project_source_url) && <a href={project.project_source_url} target="_blank" rel="noopener noreferrer">Project source ↗</a>}
+      </div>}
+      <div className="map-footer"><span>{sourceLabel}</span><span>Approximate points, not project boundaries</span></div>
     </Card>
   );
 }

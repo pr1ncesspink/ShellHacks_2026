@@ -7,8 +7,7 @@ import {
   PageHeading,
   WorkspaceFooter,
 } from "@/components/workspace";
-import { FileUpload } from "@/components/file-upload";
-import { ProjectMap } from "@/components/project-map";
+import { DashboardWorkspace } from "@/components/dashboard-workspace";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getDashboardData } from "@/lib/backend";
@@ -39,14 +38,14 @@ export default async function DashboardPage() {
       <SiteHeader active="dashboard" user={user} />
       <main id="main-content" className="workspace">
         <PageHeading />
-        <section className="upload-section upload-section-first" aria-label="Construction plans">
-          <FileUpload />
-        </section>
+        <DashboardWorkspace />
+        <h2>Backend similarity results</h2>
+        <p className="metric-note">These results come from the backend dataset and do not change when a PDF replaces the local map.</p>
         <div className={`data-banner ${failed ? "error-banner" : ""}`}>
           <span>
             <Info size={15} aria-hidden="true" />
             {data.mode === "example"
-              ? "Overlap statistics use example data. The map shows a static reference dataset."
+              ? "Backend similarity statistics use example data until a backend is configured."
               : failed
                 ? "We couldn’t load project data. Check your backend connection and try again."
                 : "Live project data from your connected backend."}
@@ -67,7 +66,7 @@ export default async function DashboardPage() {
             </Badge>
           )}
         </div>
-        <div className="dashboard-grid">
+        <div className="backend-results">
           <section
             aria-label="Project overlap statistics"
             className="stats-column"
@@ -136,7 +135,7 @@ export default async function DashboardPage() {
               </p>
             </Card>
           </section>
-          <ProjectMap />
+
         </div>
         <WorkspaceFooter />
       </main>

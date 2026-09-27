@@ -1964,3 +1964,53 @@ svg {
 .project-location-tooltip { max-width: 300px; white-space: normal; color: #101d30; }
 .project-map-tooltip-content strong { display: block; margin-bottom: 4px; }
 .project-map-tooltip-content { font-size: 12px; line-height: 1.5; }
+
+/* PDF project workspace and interactive map */
+.project-map-count { color: #00afb8; font-size: 12px; white-space: nowrap; }
+.project-map-toolbar { padding: 12px 20px; display: grid; gap: 6px; }
+.project-map-toolbar label { font-size: 11px; color: #9eacb6; }
+.project-map-toolbar select { width: 100%; min-width: 0; background: #12202b; color: #e7f0f5; border: 1px solid #34505b; border-radius: 7px; padding: 8px; font: inherit; font-size: 12px; }
+.project-map-stage { position: relative; flex: 1; min-height: 380px; }
+.project-map-canvas { position: absolute; inset: 0; }
+.project-map-pin { width: 13px; height: 13px; padding: 0; border-radius: 50%; border: 2px solid white; background: #008e97; box-shadow: 0 1px 5px #0009; cursor: pointer; }
+.project-map-pin:focus-visible { outline: 3px solid #f7b955; outline-offset: 3px; }
+.project-map-status { position: absolute; top: 12px; left: 12px; right: 55px; padding: 10px; background: #12202bed; color: white; border-radius: 6px; font-size: 12px; }
+.project-map-status button { text-decoration: underline; margin-left: 8px; cursor: pointer; }
+.project-map-details { display: grid; gap: 4px; padding: 12px 20px; font-size: 12px; }
+.project-map-details span { color: #9eacb6; }
+.project-map-details a { color: #36d3db; }
+.maplibregl-popup-content { color: #172a36; font-size: 12px; line-height: 1.5; padding: 15px 22px 15px 15px; }
+.maplibregl-popup-content p { color: #334b59; margin-top: 5px; }
+.maplibregl-popup-close-button { padding: 0 5px; font-size: 18px; }
+.map-card .map-footer { flex-wrap: wrap; }
+
+.project-map-stage .project-map-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+.project-map-toolbar .project-map-line-toggle { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: #f0b46f; }
+.project-map-line-toggle input { accent-color: #d26914; }
+.project-map-toolbar .project-map-line-note { font-size: 11px; line-height: 1.5; color: #b1bdc8; margin: 0; }
+.project-map-reset { justify-self: start; font-size: 11px; padding: 5px 10px; border: 1px solid #34505b; border-radius: 5px; color: #d7ebef; cursor: pointer; }
+
+.pdf-upload { padding: 24px; }
+.pdf-help, .pdf-upload > p { color: #b1bdc8; font-size: 13px; line-height: 1.6; margin: 14px 0; }
+.pdf-review-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: center; margin: 18px 0; font-size: 13px; }
+.pdf-review-rows { max-height: 600px; overflow: auto; }
+.pdf-review-row { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; border: 1px solid #34505b; border-radius: 8px; padding: 16px; margin: 16px 0; }
+.pdf-review-row legend { font-size: 13px; color: #52c6c9; padding: 0 6px; }
+.pdf-review-row label { display: grid; gap: 5px; font-size: 12px; color: #b1bdc8; }
+.pdf-review-row input { min-width: 0; width: 100%; padding: 9px; background: #0e1a29; border: 1px solid #34505b; border-radius: 5px; color: white; }
+.pdf-review-row .upload-error { grid-column: 1/-1; }
+.pdf-text { margin: 18px 0; font-size: 13px; }
+.pdf-text summary { cursor: pointer; color: #52c6c9; }
+.pdf-text pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 250px; overflow: auto; padding: 14px; background: #0e1a29; font-size: 11px; }
+.nearby-projects { padding: 0 22px 20px; max-height: 340px; overflow: auto; font-size: 12px; }
+.nearby-projects > div { display: grid; gap: 5px; padding: 12px 0; border-bottom: 1px solid #34505b; }
+.nearby-projects span { color: #b1bdc8; }
+.nearby-projects small { color: #52c6c9; }
+@media (max-width: 600px) { .pdf-review-row { grid-template-columns: 1fr; } }
+
+.project-map-pin.is-nearby { background: #f28c28; }
+.project-map-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; color: inherit; }
+.project-map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.project-map-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #008e97; }
+.project-map-legend i.nearby-swatch { background: #f28c28; }
