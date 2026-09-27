@@ -44,8 +44,9 @@ as text, never HTML.
 ## Agent request limits
 
 FastAPI applies a sliding 60-second window before agent execution to
-`POST /collisions/{overlap_id}/diagnosis`, `POST /a2a`, and all POST paths below
-`/a2a/`. Non-POST requests (including OPTIONS and agent cards), health checks,
+`POST /collisions/{overlap_id}/diagnosis`, `POST /projects/uploads` (Snowflake AI
+extraction), `POST /a2a`, and all POST paths below `/a2a/`. Over-limit uploads
+are rejected before the request body is read. Non-POST requests (including OPTIONS and agent cards), health checks,
 similarity, and collision listings do not consume a slot. Rejection is HTTP 429
 with `{"detail":"Agent rate limit exceeded","scope":"client"}` (or
 `"scope":"total"`) and a `Retry-After` header in whole seconds, rounded up.

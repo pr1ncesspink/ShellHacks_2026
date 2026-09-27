@@ -1,4 +1,4 @@
-"""Pure ASGI admission gate for routes that can reach an agent model."""
+"""Pure ASGI admission gate for routes that can reach an agent or paid AI extraction."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from backend.app.services.rate_limiter import AgentRateLimiter
 
 
-AGENT_PATH = re.compile(r"^(/collisions/[^/]+/diagnosis|/a2a(/.*)?)$")
+AGENT_PATH = re.compile(r"^(/collisions/[^/]+/diagnosis|/projects/uploads|/a2a(/.*)?)$")
 USER_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 

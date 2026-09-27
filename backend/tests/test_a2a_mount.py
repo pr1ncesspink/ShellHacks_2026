@@ -84,7 +84,7 @@ def test_a2a_agent_card_is_available_when_enabled(monkeypatch):
     payload = response.json()
     assert payload["name"] == "overlap_agent"
     assert payload["url"].endswith("/a2a")
-    assert len(payload["skills"]) == 3
+    assert len(payload["skills"]) == 4
     with TestClient(create_app()) as client:
         diagnosis = client.get("/a2a/diagnosis/.well-known/agent-card.json")
     assert diagnosis.status_code == 200

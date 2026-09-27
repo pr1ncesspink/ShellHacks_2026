@@ -185,7 +185,7 @@ def test_invalid_rate_config_fails_app_creation(monkeypatch):
         create_app()
 
 
-@pytest.mark.parametrize("path", [DIAGNOSIS_PATH, "/a2a", "/a2a/", "/a2a/diagnosis", "/a2a/arbitrary/deep/path"])
+@pytest.mark.parametrize("path", [DIAGNOSIS_PATH, "/projects/uploads", "/a2a", "/a2a/", "/a2a/diagnosis", "/a2a/arbitrary/deep/path"])
 def test_every_agent_post_is_rejected_without_reading_body_or_calling_app(path):
     clock = [0.0]
     limiter = AgentRateLimiter(0, 1, clock=lambda: clock[0])
@@ -212,6 +212,7 @@ def test_every_agent_post_is_rejected_without_reading_body_or_calling_app(path):
     ("POST", "/similarity"), ("POST", "/collisions/a/diagnosis/extra"),
     ("POST", "/collisions/a/b/diagnosis"), ("POST", "/a2a-other"),
     ("GET", "/a2a/.well-known/agent-card.json"), ("GET", "/health"),
+    ("GET", "/projects/uploads/UPL_1/collisions"), ("POST", "/projects/uploads/extra"),
     *[(method, DIAGNOSIS_PATH) for method in ("GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE")],
 ])
 def test_outside_agent_post_surface_bypasses_exhausted_limiter(method, path):

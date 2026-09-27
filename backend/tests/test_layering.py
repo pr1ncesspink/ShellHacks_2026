@@ -16,6 +16,22 @@ def imported_modules(path: Path) -> set[str]:
     return names
 
 
+def module_level_imports(path: Path) -> set[str]:
+    """Imports executed when the module loads (function-local imports are lazy)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names = set()
+    pending = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+        elif isinstance(node, (ast.If, ast.Try, ast.With, ast.ExceptHandler, ast.ClassDef)):
+            pending.extend(ast.iter_child_nodes(node))
+    return names
+
+
 def test_services_and_core_do_not_import_fastapi_or_agent_runtime():
     for directory in [ROOT / "services", ROOT / "core"]:
         for path in directory.glob("*.py"):
@@ -36,9 +52,10 @@ def test_agents_do_not_import_fastapi_or_api():
         imports = imported_modules(path)
         assert not any(name == "fastapi" or name.startswith("fastapi.") for name in imports)
         assert not any(name == "backend.app.api" or name.startswith("backend.app.api.") for name in imports)
+        # Snowflake/openpyxl-backed modules may only be imported lazily inside tools.
         assert not any(
             name == "backend.documentparsing" or name.startswith("backend.documentparsing.")
-            for name in imports
+            for name in module_level_imports(path)
         )
 
 
