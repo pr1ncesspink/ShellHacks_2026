@@ -523,7 +523,7 @@ svg {
   justify-content: center;
   padding: 40px 35px 57px;
   text-align: center;
-  background: radial-gradient(ellipse at 50% 45%, #1d84f508, transparent 65%);
+  background: #142237;
 }
 .map-placeholder::before,
 .map-placeholder::after {
@@ -1525,7 +1525,7 @@ svg {
 }
 .profile-cover {
   height: 140px;
-  background: linear-gradient(120deg, #1d84f52b, #00afb81c);
+  background: #183c50;
   border-bottom: 1px solid #1d84f522;
 }
 .profile-summary-content {
@@ -1679,7 +1679,7 @@ svg {
   position: absolute;
   inset: auto 0 0;
   height: 1px;
-  background: linear-gradient(90deg, #1d84f580, #00afb860 48%, #9d57de60 82%, #e6559840);
+  background: #1d84f580;
   pointer-events: none;
 }
 .main-nav a[href="/budget"][aria-current]::after {
@@ -1695,28 +1695,28 @@ svg {
   height: 3px;
   border-radius: 3px;
   margin-top: 17px;
-  background: linear-gradient(90deg, var(--grid-blue), var(--grid-teal) 55%, var(--grid-violet) 85%, var(--grid-pink));
+  background: var(--grid-teal);
 }
 .metric-card:first-child {
   border-color: #1d84f53b;
-  background: linear-gradient(145deg, #1d84f512, transparent 75%), var(--card);
+  background: #152b44;
   box-shadow: inset 0 2px 0 #1d84f580;
 }
 .metric-card:nth-child(2) {
   border-color: #00afb83b;
-  background: linear-gradient(145deg, #00afb812, transparent 75%), var(--card);
+  background: #142e3c;
   box-shadow: inset 0 2px 0 #00afb880;
 }
 .distribution-card {
   border-color: #9d57de35;
-  background: linear-gradient(145deg, #9d57de0d, transparent 65%), var(--card);
+  background: #20243e;
   box-shadow: inset 0 2px 0 #9d57de70;
 }
 .map-card {
   border-color: #00afb82b;
 }
 .map-card .panel-heading {
-  background: linear-gradient(110deg, #1d84f50a, #00afb80c);
+  background: #152d3e;
   border-bottom-color: #00afb820;
 }
 .map-reticle { color: var(--grid-teal); }
@@ -1724,13 +1724,13 @@ svg {
 .map-reticle::before { background: #00afb80c; }
 .upload-card {
   border-color: #9d57de60;
-  background: linear-gradient(110deg, #1d84f50b, #9d57de0b 70%, #e655980a), #14223760;
+  background: #1c243d;
 }
 .upload-icon { border-color: #00afb840; color: var(--grid-teal); background: #00afb80d; }
 .upload-button,
 .preview-button,
 .profile-dashboard-button {
-  background: linear-gradient(115deg, #176cca, #1d84f5);
+  background: #1d84f5;
   box-shadow: 0 4px 16px #1d84f518;
 }
 .upload-button:hover,
@@ -1739,7 +1739,7 @@ svg {
 .budget-intro {
   border-color: #9d57de40;
   border-left: 3px solid var(--grid-violet);
-  background: linear-gradient(100deg, #9d57de12, #e6559808);
+  background: #25233d;
 }
 .budget-input,
 .profile-info:first-child {
@@ -1748,7 +1748,7 @@ svg {
 }
 .budget-response {
   border-color: #00afb835;
-  background: linear-gradient(145deg, #00afb80a, transparent 70%), var(--card);
+  background: #142c39;
   box-shadow: inset 0 2px 0 #00afb870;
 }
 .response-lines span { background: #1d84f575; }
@@ -1756,13 +1756,11 @@ svg {
 .response-lines span:nth-child(3) { background: #9d57de65; }
 .login-card {
   border-color: #9d57de35;
-  background: radial-gradient(ellipse at top right, #9d57de0d, transparent 60%), var(--card);
+  background: var(--card);
   box-shadow: inset 0 2px 0 #9d57de70, 0 24px 80px #00000012;
 }
 .login-story h1 > span {
-  background: linear-gradient(110deg, #73b9ff, #65d0d5 55%, #c194eb);
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: #65d0d5;
 }
 .otp-preview span:nth-child(1),
 .otp-preview span:nth-child(2) { border-bottom-color: #1d84f580; }
@@ -1774,7 +1772,7 @@ svg {
 .profile-preview-button:hover { background: #9d57de20; }
 .signup-benefits > div:nth-child(2) svg { color: var(--grid-violet); }
 .profile-cover {
-  background: linear-gradient(115deg, #1d84f547, #00afb835 48%, #9d57de3b 85%, #e6559826);
+  background: #183c50;
   border-bottom-color: #00afb84a;
 }
 .profile-summary { border-color: #00afb835; }
