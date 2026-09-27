@@ -108,7 +108,8 @@ accepts `--osm-snapshot`. No network geocoding is enabled automatically.
 `POST /projects/uploads` accepts multipart `file`, plus optional `utility` and `state`.
 It parses and stores the projects, computes/stores collisions, and returns `upload_id`,
 counts, exclusions, reference snapshot ID, and `collisions_url`. Processing is synchronous;
-long plans may require a longer HTTP/proxy timeout. There is no background job queue.
+long plans may require a longer HTTP/proxy timeout. For PDFs up to 50 MB, use the
+asynchronous upload sessions described in "Large PDF uploads" below.
 
 `GET /projects/uploads/{upload_id}/collisions?offset=0&limit=100` reads completed results.
 The response contains `collisions` and `next_offset`; follow pages until it is null.
@@ -141,6 +142,104 @@ scorer or its `name_similarity` contract. No automatic outbound agent messages a
 These routes inherit the application's current lack of user authentication. An upload
 ID scopes queries but is not an authorization boundary. Keep the service local or behind
 authenticated access until tenant identity and ownership checks are implemented.
+
+## Large PDF uploads (signed GCS URL + Cloud Run Job)
+
+The browser uploads the PDF directly to Cloud Storage with a V4 signed PUT URL, then
+a Cloud Run Job runs the existing `process_plan`. Neither Vercel nor a Cloud Run request
+body carries the file. All three routes require `X-Authenticated-User` (set by the
+Next.js server). A session owned by another user returns 404. Session IDs must match
+`^SES_[a-f0-9]{32}$`; any other ID returns 422 before any storage call.
+
+| Route | Response |
+| --- | --- |
+| `POST /projects/upload-sessions` `{"size_bytes": n}` | 201 `{session_id, upload_url, method: "PUT", required_headers: {"Content-Type": "application/pdf", "x-goog-content-length-range": "1,<MAX>"}, expires_at}`. Returns 422 when `n` is not 1..`UPLOAD_MAX_BYTES`. |
+| `POST /projects/upload-sessions/{id}/process` | 202 `{status: "queued"}` and exactly one job launch. A repeat returns 200 with the GET shape. A missing object returns 409. A non-PDF or oversize object returns 422 and deletes the object. |
+| `GET /projects/upload-sessions/{id}` | `{session_id, status, upload_id, error_code, updated_at}`. `status` is `created`, `queued`, `processing`, `succeeded`, or `failed`. |
+
+- The browser PUTs to `upload_url` with the `required_headers` exactly as given. The URL
+  expires after 900 seconds. The object name is `uploads/<session_id>.pdf`. User filenames are never used.
+- The signature is created by IAM `signBlob` as the runtime service account
+  (`google.auth.iam.Signer`). No key file is used.
+- Session state is stored as `sessions/<id>.json`, written with `ifGenerationMatch`. Only
+  the `created -> queued` transition launches a job.
+- The job re-checks the size and `%PDF-` header and then calls `process_plan`. It writes
+  `succeeded` with an `upload_id`, or `failed` with an `error_code`. It always deletes the
+  PDF. It exits 0 when processing fails, so the job is not retried. `error_code` is one of
+  `invalid_pdf`, `too_large`, `snowflake_failed`, `reference_unavailable`, `timeout`, or `internal`.
+  `reference_unavailable` means only that no reference dataset is loaded. Other `ValueError`s,
+  including missing Snowflake settings, are `internal`. Exception messages are never returned.
+- A session left in `queued` or `processing` for more than `UPLOAD_JOB_TIMEOUT_S + 300`
+  seconds is reported as `failed` with `timeout`. The stored state is not changed. If the
+  job finishes late, the same session can later show `succeeded`. The same can happen after
+  any client-side timeout.
+- If the job cannot be launched, the process call returns 502. The object delete and the
+  `failed`/`internal` write are both best effort.
+- Configuration that references the Firebase project `shellhacks26-c78d4` is refused.
+  Missing configuration returns 503. The two POST routes count against the agent rate limit.
+
+Service environment: `UPLOAD_BUCKET=shellhacks-2026-plan-uploads`,
+`UPLOAD_JOB_NAME=shellhacks-upload-job`, `UPLOAD_MAX_BYTES=52428800` (default),
+`UPLOAD_JOB_REGION=us-east1` (default), `UPLOAD_JOB_TIMEOUT_S=3600` (default).
+The job needs `UPLOAD_BUCKET` and `UPLOAD_MAX_BYTES`, plus the service's Snowflake/`GRIDLOCK_*` settings.
+
+Operational notes:
+
+- Keep `UPLOAD_MAX_BYTES` at `52428800` (52_428_800). The frontend has its own
+  `MAX_UPLOAD_BYTES` in `src/lib/upload-sessions.ts`. Change both values together or not at all.
+- Every upload-session route requires `X-Authenticated-User`. Local preview with
+  `BACKEND_AUTH=none` and no signed-in user gets 401, so upload sessions cannot be used there.
+- Status polling depends on the browser sending the `Sec-Fetch-Site` header. Older Safari
+  versions that do not send it are not supported.
+
+### Runbook (human-run, in `shellhacks-2026` only)
+
+```powershell
+gcloud services enable iamcredentials.googleapis.com run.googleapis.com --project=shellhacks-2026
+
+gcloud storage buckets create gs://shellhacks-2026-plan-uploads --project=shellhacks-2026 `
+  --location=us-east1 --uniform-bucket-level-access --public-access-prevention
+gcloud storage buckets update gs://shellhacks-2026-plan-uploads --cors-file=cors.json
+gcloud storage buckets update gs://shellhacks-2026-plan-uploads --lifecycle-file=lifecycle.json
+
+$SA = "shellhacks-api-runtime@shellhacks-2026.iam.gserviceaccount.com"
+gcloud storage buckets add-iam-policy-binding gs://shellhacks-2026-plan-uploads `
+  --member="serviceAccount:$SA" --role=roles/storage.objectAdmin
+gcloud iam service-accounts add-iam-policy-binding $SA --project=shellhacks-2026 `
+  --member="serviceAccount:$SA" --role=roles/iam.serviceAccountTokenCreator
+
+# The image's default command is uvicorn. The job therefore sets --command=python. Each
+# execution overrides args with ["-m","backend.projectdata.upload_job","--session",<id>].
+gcloud run jobs create shellhacks-upload-job --project=shellhacks-2026 --region=us-east1 `
+  --image=<same image as shellhacks-api> --service-account=$SA `
+  --command=python --args=-m,backend.projectdata.upload_job `
+  --max-retries=0 --task-timeout=3600 --memory=4Gi --cpu=2 `
+  --set-secrets=SNOWFLAKE_TOKEN=snowflake-pat:latest `
+  --set-env-vars=UPLOAD_BUCKET=shellhacks-2026-plan-uploads,UPLOAD_MAX_BYTES=52428800,<same SNOWFLAKE_*/GRIDLOCK_* values as the service>
+gcloud run jobs add-iam-policy-binding shellhacks-upload-job --project=shellhacks-2026 `
+  --region=us-east1 --member="serviceAccount:$SA" --role=roles/run.jobsExecutorWithOverrides
+
+gcloud run services update shellhacks-api --project=shellhacks-2026 --region=us-east1 `
+  --update-env-vars=UPLOAD_BUCKET=shellhacks-2026-plan-uploads,UPLOAD_JOB_NAME=shellhacks-upload-job,UPLOAD_MAX_BYTES=52428800
+```
+
+`cors.json` allows only the production site and local development. Preview deployments are excluded:
+
+```json
+[{"origin": ["https://gridlens.vercel.app", "http://localhost:3000"],
+  "method": ["PUT"],
+  "responseHeader": ["Content-Type", "x-goog-content-length-range"],
+  "maxAgeSeconds": 3600}]
+```
+
+`lifecycle.json` deletes leftover uploads after 1 day and session records after 7 days:
+
+```json
+{"rule": [
+  {"action": {"type": "Delete"}, "condition": {"age": 1, "matchesPrefix": ["uploads/"]}},
+  {"action": {"type": "Delete"}, "condition": {"age": 7, "matchesPrefix": ["sessions/"]}}
+]}
+```
 
 ## Matching rules and data limits
 

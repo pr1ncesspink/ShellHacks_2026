@@ -12,6 +12,7 @@ from backend.app.services.rate_limiter import AgentRateLimiter
 
 AGENT_PATH = re.compile(
     r"^(/collisions/[^/]+/diagnosis|/projects/uploads|"
+    r"/projects/upload-sessions|/projects/upload-sessions/[^/]+/process|"
     r"/projects/uploads/[^/]+/collisions/[^/]+/diagnosis|/a2a(/.*)?)$"
 )
 USER_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
