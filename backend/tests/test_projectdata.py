@@ -18,6 +18,7 @@ from backend.projectdata.matching import EARTH_RADIUS_MILES, find_collisions
 from backend.projectdata.pipeline import process_plan, score_collision_page
 from backend.projectdata.records import ProjectPoint, parsed_points, reference_csv
 from backend.projectdata.storage import DatabaseNames, ProjectStore
+import backend.projectdata.__main__ as projectdata_cli
 
 
 UPLOAD = "UPL_" + "a" * 32
@@ -191,6 +192,28 @@ def test_sql_api_reads_all_result_partitions():
     settings = SnowflakeSettings(account="test", user="test", token="secret", warehouse="WH")
     with httpx.Client(transport=httpx.MockTransport(respond)) as http:
         assert SnowflakeClient(settings, http=http).query_rows("SELECT X") == [["first"], ["second"]]
+
+
+def test_check_cli_reports_connection_context_without_database_context(monkeypatch, capsys):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"data": [["account", "user", "role", "warehouse"]]})
+
+    settings = SnowflakeSettings(account="test", user="user", token="secret", warehouse="WH")
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        monkeypatch.setattr(projectdata_cli.SnowflakeSettings, "from_env", lambda: settings)
+        monkeypatch.setattr(projectdata_cli, "SnowflakeClient",
+                            lambda configured: SnowflakeClient(configured, http=http, sleep=lambda _: None))
+        assert projectdata_cli.main(["check"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "account": "account", "user": "user", "role": "role", "warehouse": "warehouse",
+    }
+    assert len(requests) == 1
+    body = json.loads(requests[0].content)
+    assert body["statement"] == "SELECT CURRENT_ACCOUNT(), CURRENT_USER(), CURRENT_ROLE(), CURRENT_WAREHOUSE()"
+    assert "database" not in body and "schema" not in body
 
 
 def test_a2a_upload_tool_reads_new_dataset(monkeypatch, fake_encoder):

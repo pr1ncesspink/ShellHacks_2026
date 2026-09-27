@@ -314,6 +314,29 @@ class TransportTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(SnowflakeError):
                 self.client(lambda _: httpx.Response(200, json=payload)).scalar_json("SELECT 1")
 
+    def test_sql_api_error_includes_only_safe_status_identifiers(self):
+        def handler(_):
+            return httpx.Response(400, json={"code": "390189", "sqlState": "08004", "message": "secret-pat role X"})
+        with self.assertRaises(SnowflakeError) as caught:
+            self.client(handler).execute("SELECT 1")
+        self.assertIn("400", str(caught.exception))
+        self.assertIn("390189", str(caught.exception))
+        self.assertIn("08004", str(caught.exception))
+        self.assertNotIn("secret-pat", str(caught.exception))
+
+    def test_sql_api_error_ignores_invalid_or_non_json_status_identifiers(self):
+        for content in (b"not json", {"code": "a b;DROP", "sqlState": "wrong state"}):
+            with self.subTest(content=content), self.assertRaisesRegex(SnowflakeError, r"HTTP 422$"):
+                self.client(lambda _: httpx.Response(422, content=content) if isinstance(content, bytes)
+                            else httpx.Response(422, json=content)).execute("SELECT 1")
+
+    def test_statement_failure_includes_safe_sql_state_only(self):
+        with self.assertRaisesRegex(SnowflakeError, r"code 000606, sqlState 42501") as caught:
+            self.client(lambda _: httpx.Response(200, json={
+                "code": "000606", "sqlState": "42501", "message": "secret-pat warehouse",
+            })).execute("SELECT 1")
+        self.assertNotIn("secret-pat", str(caught.exception))
+
     def test_upload_checks_transfer_status_and_preserves_file_extension(self):
         class Cursor:
             description = [("status",)]

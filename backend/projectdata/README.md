@@ -49,6 +49,32 @@ GRIDLOCK_UPLOAD_DATABASE=GRIDLOCK_UPLOADS
 GRIDLOCK_DATA_SCHEMA=APP
 ```
 
+### Local env file
+
+Copy `backend/.env.snowflake.example` to `backend/.env.snowflake`, replace every
+placeholder, then run commands through the loader. The local file is gitignored;
+the Python CLI deliberately does not load it itself.
+
+```powershell
+scripts/snowflake.ps1 check
+scripts/snowflake.ps1 setup
+```
+
+`check` is read-only. It prints the current account, user, role, and warehouse as
+JSON without selecting a database or schema. `setup` creates the pipeline's
+namespaces only when absent.
+
+| Reported code | Likely configuration issue |
+| --- | --- |
+| 390303 or 390144 | The PAT is bad or expired, or its user is not covered by a network policy. |
+| 390189 | The selected role is not granted to the token user. |
+| 000606 | The warehouse is missing or the role lacks USAGE. |
+| 003001 or 002003 | The role lacks CREATE DATABASE or an object privilege. |
+| 390100 or HTTP 404 | `SNOWFLAKE_ACCOUNT` is incorrect. Use an account identifier, with `_` written as `-` in the host. |
+
+Errors include only the HTTP status and safe Snowflake `code` and `sqlState`
+identifiers. Response messages and token values are intentionally not shown.
+
 The existing application requirements are hash-locked but their source lockfile is
 absent. `requirements-projectdata.txt` is a bounded integration requirements file,
 not a regenerated lock. The Dockerfile installs this overlay and runs `pip check`;

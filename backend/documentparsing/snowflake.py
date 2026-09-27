@@ -27,6 +27,18 @@ def json_object(value, operation: str) -> dict:
     return result
 
 
+def safe_error_details(value) -> str:
+    """Return only safe Snowflake status identifiers from an error payload."""
+    if not isinstance(value, dict):
+        return ""
+    details = []
+    for key in ("code", "sqlState"):
+        item = value.get(key)
+        if isinstance(item, str) and re.fullmatch(r"[0-9A-Za-z]{1,10}", item):
+            details.append(f"{key} {item}")
+    return f" ({', '.join(details)})" if details else ""
+
+
 class SnowflakeClient:
     def __init__(self, settings: SnowflakeSettings, *, http=None, connect=None, sleep=time.sleep):
         self.settings = settings
@@ -64,14 +76,27 @@ class SnowflakeClient:
                         return 202, pending
                 if response.status_code not in (429, 500, 502, 503, 504):
                     if response.status_code not in (200, 202):
-                        raise SnowflakeError(f"Snowflake SQL API returned HTTP {response.status_code}")
+                        try:
+                            error = response.json()
+                        except ValueError:
+                            error = None
+                        raise SnowflakeError(
+                            f"Snowflake SQL API returned HTTP {response.status_code}{safe_error_details(error)}"
+                        )
                     try:
                         payload = json_object(response.json(), "SQL API")
                     except ValueError:
                         raise SnowflakeError("Snowflake SQL API returned invalid JSON") from None
                     return response.status_code, payload
                 if attempt == 2:
-                    raise SnowflakeError(f"Snowflake SQL API returned HTTP {response.status_code} after 3 attempts")
+                    try:
+                        error = response.json()
+                    except ValueError:
+                        error = None
+                    raise SnowflakeError(
+                        f"Snowflake SQL API returned HTTP {response.status_code} after 3 attempts"
+                        f"{safe_error_details(error)}"
+                    )
             if method == "POST" and "requestId" in params:
                 params["retry"] = "true"  # Same request ID prevents a second execution.
             self._sleep(min(2 ** attempt, 4))
@@ -104,7 +129,7 @@ class SnowflakeClient:
             self._sleep(1)
             status, payload = self._request("GET", f"/api/v2/statements/{handle}")
         if payload.get("code") not in (None, "000000", "090001"):
-            raise SnowflakeError(f"Snowflake statement failed (code {payload.get('code')})")
+            raise SnowflakeError(f"Snowflake statement failed{safe_error_details(payload)}")
         return payload
 
     def scalar_json(self, statement: str, values=()) -> dict:

@@ -15,6 +15,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("setup")
+    sub.add_parser("check", help="Print the active Snowflake account, user, role, and warehouse")
     for name in ("inspect", "seed"):
         command = sub.add_parser(name)
         command.add_argument("--csv", type=Path, default=Path("gridlock_real_projects_geospatial.csv"))
@@ -35,19 +36,29 @@ def main(argv=None):
         if args.command == "upload" and args.input.resolve() == args.output.resolve():
             raise ValueError("Collision output must not overwrite the input file")
         with SnowflakeClient(SnowflakeSettings.from_env()) as client:
-            store = ProjectStore(client)
-            if args.command in {"setup", "seed"}:
-                # Validate before creating any remote objects.
-                if args.command == "seed":
-                    reference_csv(args.csv)
-                client.setup()
-                store.setup()
-                result = seed_reference(args.csv, store) if args.command == "seed" else {"status": "ready"}
+            if args.command == "check":
+                rows = client.query_rows(
+                    "SELECT CURRENT_ACCOUNT(), CURRENT_USER(), CURRENT_ROLE(), CURRENT_WAREHOUSE()",
+                    context=False,
+                )
+                if len(rows) != 1 or not isinstance(rows[0], list) or len(rows[0]) != 4:
+                    raise SnowflakeError("Snowflake connectivity check returned an unexpected result")
+                account, user, role, warehouse = rows[0]
+                result = {"account": account, "user": user, "role": role, "warehouse": warehouse}
             else:
-                result = process_plan(args.input, store, client, utility=args.utility, state=args.state,
-                                      osm_snapshot=args.osm_snapshot)
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
+                store = ProjectStore(client)
+                if args.command in {"setup", "seed"}:
+                    # Validate before creating any remote objects.
+                    if args.command == "seed":
+                        reference_csv(args.csv)
+                    client.setup()
+                    store.setup()
+                    result = seed_reference(args.csv, store) if args.command == "seed" else {"status": "ready"}
+                else:
+                    result = process_plan(args.input, store, client, utility=args.utility, state=args.state,
+                                          osm_snapshot=args.osm_snapshot)
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    args.output.write_text(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
             print(json.dumps({k: v for k, v in result.items() if k not in {"collisions", "extraction_audit"}}))
         return 0
     except (ValueError, OSError, SnowflakeError) as exc:
