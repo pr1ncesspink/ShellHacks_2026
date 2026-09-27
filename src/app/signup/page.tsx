@@ -5,7 +5,7 @@ import { SignUpForm } from "@/components/auth/sign-up-form";
 import { Brand } from "@/components/brand";
 import { getUser } from "@/lib/server/session";
 
-export const metadata = { title: "Create Account" };
+export const metadata = { title: "Create account" };
 
 export default async function SignupPage() {
   if (await getUser()) redirect("/dashboard");
@@ -14,15 +14,12 @@ export default async function SignupPage() {
       <header className="login-header">
         <Brand />
         <Link href="/" className="subtle-link">
-          Back to sign in <ArrowRight size={14} aria-hidden="true" />
+          Back to sign in <ArrowRight size={16} aria-hidden="true" />
         </Link>
       </header>
       <main id="main-content" className="login-main">
         <section className="login-story">
-          <div className="eyebrow">
-            <span className="tiny-dot" />
-            YOUR NEXT CHAPTER, CONNECTED.
-          </div>
+          <p className="eyebrow">Get started</p>
           <h1>
             A place for <br />
             your plans. <br />
@@ -31,22 +28,30 @@ export default async function SignupPage() {
           <p>
             Create an account with your email.
             <br />
-            Verify it before entering your private workspace.
+            You’ll verify it before opening your private workspace.
           </p>
           <div className="signup-benefits">
             <div>
-              <Layers3 size={20} aria-hidden="true" />
+              <Layers3
+                size={16}
+                aria-hidden="true"
+                className="text-muted-foreground"
+              />
               <span>
                 One connected workspace
                 <small>Project context, overlap insights, and room to plan.</small>
               </span>
             </div>
             <div>
-              <ShieldCheck size={20} aria-hidden="true" />
+              <ShieldCheck
+                size={16}
+                aria-hidden="true"
+                className="text-muted-foreground"
+              />
               <span>
                 Verified access
                 <small>
-                  Your workspace opens after Firebase verifies your email.
+                  Your workspace opens once Firebase verifies your email.
                 </small>
               </span>
             </div>
@@ -54,10 +59,6 @@ export default async function SignupPage() {
         </section>
         <SignUpForm />
       </main>
-      <footer className="login-footer">
-        <span>GridLens / Built for better coordination.</span>
-        <span>One connected view.</span>
-      </footer>
     </div>
   );
 }

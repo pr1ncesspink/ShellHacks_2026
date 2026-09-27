@@ -2,8 +2,11 @@
 
 ``python -m backend.projectdata.upload_job --session SES_<hex>``
 
-The PDF is re-validated before any Snowflake call, the session ends ``succeeded`` or
-``failed`` with a generic error code, and the GCS object is deleted in ``finally``.
+The uploaded PDF or CSV is re-validated before any Snowflake call, the session ends
+``succeeded`` or ``failed`` with a generic error code, and the GCS object is deleted in
+``finally``. While processing, the current pipeline stage is written into the session
+document (best effort, see ``progress.ProgressReporter``). After a successful run the
+upload is summarized (stage ``summarizing``); a summary failure never fails the job.
 Processing failures exit 0 because the job runs with max-retries 0 (no double billing).
 """
 
@@ -17,9 +20,10 @@ import sys
 from tempfile import TemporaryDirectory
 
 from .gcs import PreconditionFailed
+from .progress import ProgressReporter
 from .upload_sessions import (
-    PDF_MAGIC, UploadConfig, iso, object_name, session_name, utc_now, validate_object,
-    validate_session_id, SessionError,
+    UploadConfig, iso, object_name, session_kind, session_name, utc_now, validate_download,
+    validate_object, validate_session_id, SessionError,
 )
 
 log = logging.getLogger("backend.projectdata.upload_job")
@@ -35,10 +39,20 @@ def snowflake_store():
         yield ProjectStore(client)
 
 
-def default_process(path, store):
+def default_process(path, store, *, progress=None):
     from .pipeline import process_plan
 
-    return process_plan(path, store, store.client)
+    return process_plan(path, store, store.client, progress=progress)
+
+
+def default_summarize(store, upload_id: str, owner: str, *, progress=None):
+    """Summarize via backend.projectdata.summary when it is available (imported lazily)."""
+    try:
+        from .summary import summarize_upload
+    except ImportError as exc:
+        log.warning("upload summaries unavailable: %s", type(exc).__name__)
+        return None
+    return summarize_upload(store, upload_id, owner, progress=progress)
 
 
 class ReferenceUnavailable(Exception):
@@ -76,14 +90,57 @@ def classify(exc: BaseException) -> str:
     return "internal"
 
 
+def _summarize(summarize, store, upload_id, owner, reporter, session_id) -> None:
+    reporter("summarizing")
+    try:
+        summarize(store, upload_id, owner, progress=reporter)
+    except Exception as exc:  # noqa: BLE001 - a summary never fails the job
+        log.error("session %s summary failed: %s", session_id, type(exc).__name__)
+
+
+def _write_final(gcs, key, session_id, document, generation) -> None:
+    try:
+        gcs.write_json(key, document, if_generation_match=generation)
+        return
+    except PreconditionFailed:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        log.error("session %s status write failed: %s", session_id, type(exc).__name__)
+        return
+    # A progress write may have landed without its generation being observed (for
+    # example a transport error after the commit). Only this job writes a processing
+    # session, so retry once on top of the current document if it is still processing.
+    try:
+        current, current_generation = gcs.read_json(key)
+        if current is None or current.get("status") != "processing":
+            log.error("session %s status write lost a race", session_id)
+            return
+        gcs.write_json(key, {**current, **{k: document[k] for k in
+                                           ("status", "error_code", "upload_id", "updated_at")}},
+                       if_generation_match=current_generation)
+    except Exception as exc:  # noqa: BLE001
+        log.error("session %s status write failed: %s", session_id, type(exc).__name__)
+
+
 def run(session_id: str, *, gcs, config: UploadConfig, store_factory=snowflake_store,
-        process=default_process, clock=utc_now) -> str | None:
-    """Process a queued session; return the final status written (None if skipped)."""
-    name, key = object_name(session_id), session_name(session_id)
+        process=default_process, summarize=None, clock=utc_now) -> str | None:
+    """Process a queued session; return the final status written (None if skipped).
+
+    ``summarize(store, upload_id, owner, *, progress=None)`` defaults to
+    ``backend.projectdata.summary.summarize_upload`` (looked up at call time).
+    """
+    summarize = summarize or default_summarize
+    key = session_name(session_id)
     document, generation = gcs.read_json(key)
     if document is None or document.get("status") != "queued":
         log.warning("session %s is not queued; nothing to do", session_id)
         return None
+    try:
+        kind = session_kind(document)
+    except SessionError:
+        log.error("session %s has an unsupported kind", session_id)
+        return None
+    name = object_name(session_id, kind)
     try:
         document = {**document, "status": "processing", "updated_at": iso(clock())}
         generation = gcs.write_json(key, document, if_generation_match=generation)
@@ -91,41 +148,44 @@ def run(session_id: str, *, gcs, config: UploadConfig, store_factory=snowflake_s
         log.warning("session %s changed concurrently; not processing", session_id)
         return None
 
+    reporter = ProgressReporter(gcs, key, document, generation, clock=clock)
+    limit = config.limit(kind)
     final = {"status": "failed", "error_code": "internal", "upload_id": None}
     try:
-        error_code, _ = validate_object(gcs, name, config.max_bytes)
+        reporter("validating")
+        error_code, _ = validate_object(gcs, name, limit, kind)
         if error_code:
             final["error_code"] = error_code
         else:
             with TemporaryDirectory(prefix="gridlock-session-") as directory:
-                path = Path(directory) / "plan.pdf"
+                path = Path(directory) / f"plan.{kind}"
                 try:
-                    gcs.download_to(name, path, config.max_bytes)
+                    gcs.download_to(name, path, limit)
                 except ValueError:
                     final["error_code"] = "too_large"
                 else:
-                    with path.open("rb") as handle:
-                        header = handle.read(len(PDF_MAGIC))
-                    if header != PDF_MAGIC:
-                        final["error_code"] = "invalid_pdf"
+                    error_code = validate_download(path, kind)
+                    if error_code:
+                        final["error_code"] = error_code
                     else:
                         with store_factory() as store:
-                            result = process(path, _ReferenceGuardedStore(store))
-                        final = {"status": "succeeded", "error_code": None,
-                                 "upload_id": result["upload_id"]}
+                            result = process(path, _ReferenceGuardedStore(store), progress=reporter)
+                            upload_id = result["upload_id"]
+                            _summarize(summarize, store, upload_id, document.get("owner", ""),
+                                       reporter, session_id)
+                        final = {"status": "succeeded", "error_code": None, "upload_id": upload_id}
     except Exception as exc:  # noqa: BLE001 - report a generic code, never the message
         final["error_code"] = classify(exc)
         log.error("session %s failed: %s", session_id, type(exc).__name__)
     finally:
+        reporter.close()
         try:
             gcs.delete(name)
         except Exception as exc:  # noqa: BLE001
             log.error("session %s object delete failed: %s", session_id, type(exc).__name__)
-        try:
-            gcs.write_json(key, {**document, **final, "updated_at": iso(clock())},
-                           if_generation_match=generation)
-        except Exception as exc:  # noqa: BLE001
-            log.error("session %s status write failed: %s", session_id, type(exc).__name__)
+        # The last progress document keeps its stage, so a failure shows where it stopped.
+        _write_final(gcs, key, session_id, {**reporter.document, **final, "updated_at": iso(clock())},
+                     reporter.generation)
     return final["status"]
 
 

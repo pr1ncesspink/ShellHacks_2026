@@ -1,20 +1,55 @@
-// Client-safe helpers for the large-PDF upload session flow. The browser only
-// talks to /api/upload-sessions/* and to the signed GCS URL returned by it.
+// Client-safe helpers for the large-upload session flow (PDF and CSV). The
+// browser only talks to /api/upload-sessions/* and to the signed GCS URL.
+import type { UploadProgress } from "./upload-progress.ts";
 
+/** PDF size cap (50 MB); kept under its historical name. */
 export const MAX_UPLOAD_BYTES = 52_428_800;
+export const MAX_CSV_BYTES = 10_485_760;
 export const SESSION_ID = /^SES_[a-f0-9]{32}$/;
 export const SESSION_STATUSES = ["created", "queued", "processing", "succeeded", "failed"] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
+export const SESSION_STAGES = [
+  "validating", "staging", "parsing", "extracting", "locating", "matching", "saving", "summarizing",
+] as const;
+export type SessionStage = (typeof SESSION_STAGES)[number];
+export const UPLOAD_KINDS = ["pdf", "csv"] as const;
+export type UploadKind = (typeof UPLOAD_KINDS)[number];
+export const UPLOAD_CONTENT_TYPES = { pdf: "application/pdf", csv: "text/csv" } as const;
+export type UploadContentType = (typeof UPLOAD_CONTENT_TYPES)[UploadKind];
+export const MAX_BYTES_BY_KIND: Record<UploadKind, number> = { pdf: MAX_UPLOAD_BYTES, csv: MAX_CSV_BYTES };
+export const CSV_REQUIRED_COLUMNS = ["project_id", "project_name", "utility"] as const;
+const MAX_STAGE_TOTAL = 100_000;
+
+/** Kind for an allow-listed content type, else null. */
+export function kindFromContentType(value: unknown): UploadKind | null {
+  if (value === UPLOAD_CONTENT_TYPES.pdf) return "pdf";
+  if (value === UPLOAD_CONTENT_TYPES.csv) return "csv";
+  return null;
+}
+
+/**
+ * Kind of a picked file: extension first (Windows often labels CSV as
+ * application/vnd.ms-excel), then MIME type. Null means unsupported.
+ */
+export function uploadKindOf(file: { name?: string; type?: string }): UploadKind | null {
+  const name = (file.name ?? "").toLowerCase();
+  if (name.endsWith(".pdf")) return "pdf";
+  if (name.endsWith(".csv")) return "csv";
+  if (/\.[a-z0-9]{1,8}$/.test(name)) return null;
+  return kindFromContentType(file.type);
+}
 
 export type CreatedSession = {
   session_id: string;
   upload_url: string;
   method: "PUT";
-  required_headers: { "Content-Type": "application/pdf"; "x-goog-content-length-range": string };
+  required_headers: { "Content-Type": UploadContentType; "x-goog-content-length-range": string };
   expires_at: string;
 };
 
 export type ProcessResult = { status: SessionStatus };
+
+export type StageDetail = { done: number; total: number };
 
 export type SessionState = {
   session_id: string;
@@ -22,6 +57,11 @@ export type SessionState = {
   upload_id: string | null;
   error_code: string | null;
   updated_at: string;
+  /** Optional backend progress fields; null when absent or unrecognised. */
+  stage: SessionStage | null;
+  stage_detail: StageDetail | null;
+  stage_started_at: string | null;
+  kind: UploadKind | null;
 };
 
 const UPLOAD_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -72,17 +112,19 @@ export function parseCreatedSession(value: unknown): CreatedSession {
   if (keys.length !== 2 || keys[0] !== "Content-Type" || keys[1] !== "x-goog-content-length-range") {
     throw new Error("Invalid required_headers");
   }
-  if (headers["Content-Type"] !== "application/pdf") throw new Error("Invalid required_headers");
+  const contentType = headers["Content-Type"];
+  const kind = kindFromContentType(contentType);
+  if (!kind) throw new Error("Invalid required_headers");
   const range = headers["x-goog-content-length-range"];
   const match = typeof range === "string" ? LENGTH_RANGE.exec(range) : null;
-  if (!match || Number(match[1]) < 1 || Number(match[1]) > MAX_UPLOAD_BYTES) throw new Error("Invalid required_headers");
+  if (!match || Number(match[1]) < 1 || Number(match[1]) > MAX_BYTES_BY_KIND[kind]) throw new Error("Invalid required_headers");
   const expiresAt = text(r, "expires_at", 64);
   if (Number.isNaN(Date.parse(expiresAt))) throw new Error("Invalid expires_at");
   return {
     session_id: sessionId(r),
     upload_url: url.href,
     method: "PUT",
-    required_headers: { "Content-Type": "application/pdf", "x-goog-content-length-range": range as string },
+    required_headers: { "Content-Type": UPLOAD_CONTENT_TYPES[kind], "x-goog-content-length-range": range as string },
     expires_at: expiresAt,
   };
 }
@@ -91,6 +133,35 @@ export function parseProcessResult(value: unknown): ProcessResult {
   return { status: status(record(value, "process result")) };
 }
 
+function stage(value: unknown): SessionStage | null {
+  return typeof value === "string" && (SESSION_STAGES as readonly string[]).includes(value) ? value as SessionStage : null;
+}
+
+function stageCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= MAX_STAGE_TOTAL ? value : null;
+}
+
+function stageDetail(value: unknown): StageDetail | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  const done = stageCount(r.done);
+  const total = stageCount(r.total);
+  return done !== null && total !== null && done <= total ? { done, total } : null;
+}
+
+function timestamp(value: unknown): string | null {
+  return typeof value === "string" && value.length <= 64 && !Number.isNaN(Date.parse(value)) ? value : null;
+}
+
+function kindValue(value: unknown): UploadKind | null {
+  return value === "pdf" || value === "csv" ? value : null;
+}
+
+/**
+ * Allow-lists the session view. Progress fields (stage, stage_detail,
+ * stage_started_at, kind) are optional and never fail the parse: unknown or
+ * malformed values become null so older and newer backends both work.
+ */
 export function parseSessionState(value: unknown): SessionState {
   const r = record(value, "session status");
   const state: SessionState = {
@@ -99,6 +170,10 @@ export function parseSessionState(value: unknown): SessionState {
     upload_id: nullable(r, "upload_id", UPLOAD_ID),
     error_code: nullable(r, "error_code", ERROR_CODE),
     updated_at: text(r, "updated_at", 64),
+    stage: stage(r.stage),
+    stage_detail: stageDetail(r.stage_detail),
+    stage_started_at: timestamp(r.stage_started_at),
+    kind: kindValue(r.kind),
   };
   if (state.status === "succeeded" && !state.upload_id) throw new Error("Invalid upload_id");
   return state;
@@ -141,6 +216,11 @@ export function isTransientPollError(reason: unknown): boolean {
   return reason instanceof UploadApiError && (reason.status === null || reason.status === 502 || reason.status === 503);
 }
 
+/** 401/403/404 while polling: the session expired or belongs to another account. */
+export function isSessionNotFoundError(reason: unknown): boolean {
+  return reason instanceof UploadApiError && (reason.status === 401 || reason.status === 403 || reason.status === 404);
+}
+
 export type PollFailureAction =
   | { action: "retry"; consecutive: number }
   | { action: "give-up" }
@@ -170,6 +250,73 @@ export async function validatePdf(file: Blob): Promise<PdfCheck> {
   return { ok: true };
 }
 
+const CSV_HEADER_SCAN_BYTES = 65_536;
+
+/** Split one CSV record (RFC 4180 quoting) into fields. */
+export function splitCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') { field += '"'; i += 1; }
+      else if (ch === '"') quoted = false;
+      else field += ch;
+    } else if (ch === '"' && field === "") quoted = true;
+    else if (ch === ",") { fields.push(field); field = ""; }
+    else field += ch;
+  }
+  fields.push(field);
+  return fields;
+}
+
+/**
+ * Size limit, strict UTF-8 on the header row, and the structured-import
+ * columns (backend/documentparsing/pipeline.py structured_projects). The
+ * backend re-checks all of this.
+ */
+export async function validateCsv(file: Blob): Promise<PdfCheck> {
+  if (file.size <= 0) return { ok: false, error: "This CSV is empty." };
+  if (file.size > MAX_CSV_BYTES) return { ok: false, error: "CSV files must be 10 MB or smaller." };
+  const head = new Uint8Array(await file.slice(0, CSV_HEADER_SCAN_BYTES).arrayBuffer());
+  let end = head.indexOf(0x0a);
+  if (end < 0) {
+    if (file.size > head.length) return { ok: false, error: "The CSV header row is too long." };
+    end = head.length;
+  }
+  let line: string;
+  try {
+    // Default ignoreBOM=false strips a UTF-8 BOM, like Python's utf-8-sig.
+    line = new TextDecoder("utf-8", { fatal: true }).decode(head.subarray(0, end));
+  } catch {
+    return { ok: false, error: "This CSV is not UTF-8 text." };
+  }
+  const columns = new Set(splitCsvLine(line.replace(/\r$/, "")));
+  if (!CSV_REQUIRED_COLUMNS.every((column) => columns.has(column))) {
+    return { ok: false, error: "The CSV header must include project_id, project_name, and utility columns." };
+  }
+  return { ok: true };
+}
+
+/** Per-kind client validation before any API call. */
+export function validateUploadFile(file: Blob, kind: UploadKind): Promise<PdfCheck> {
+  return kind === "csv" ? validateCsv(file) : validatePdf(file);
+}
+
+/** Raised when the caller aborts (row removed, retried, or page navigated away). */
+export class UploadCancelledError extends Error {
+  constructor() {
+    super("Upload cancelled");
+    this.name = "UploadCancelledError";
+  }
+}
+
+/** True for a caller-initiated abort; such rejections must not be shown as errors. */
+export function isUploadCancelled(reason: unknown, signal?: AbortSignal): boolean {
+  return reason instanceof UploadCancelledError || signal?.aborted === true;
+}
+
 type XhrLike = Pick<XMLHttpRequest, "open" | "setRequestHeader" | "send" | "abort" | "status"> & {
   withCredentials: boolean;
   upload: { onprogress: ((event: ProgressEvent) => void) | null };
@@ -190,7 +337,7 @@ export function putToSignedUrl(
   createXhr: () => XhrLike = () => new XMLHttpRequest() as unknown as XhrLike,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(new Error("Upload cancelled")); return; }
+    if (signal?.aborted) { reject(new UploadCancelledError()); return; }
     const xhr = createXhr();
     xhr.open("PUT", session.upload_url, true);
     xhr.withCredentials = false;
@@ -208,7 +355,7 @@ export function putToSignedUrl(
     };
     xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? done() : done(new Error("Upload to storage failed")));
     xhr.onerror = () => done(new Error("Upload to storage failed"));
-    xhr.onabort = () => done(new Error("Upload cancelled"));
+    xhr.onabort = () => done(new UploadCancelledError());
     xhr.send(file);
   });
 }
@@ -256,72 +403,216 @@ export type UploadSessionDeps = {
 };
 export type UploadSessionResult = SessionState & { status: "succeeded" | "failed" };
 
+export type UploadSessionOptions = {
+  /** Legacy plain-text status labels; prefer onProgress. */
+  onStatus?: (label: string) => void;
+  /** Structured progress for the stepper; emitted only when it changes. */
+  onProgress?: (progress: UploadProgress) => void;
+  /** Fires once, after /process succeeds and before polling starts. */
+  onQueued?: (sessionId: string) => void;
+  signal?: AbortSignal;
+  /** Defaults to uploadKindOf(file), then "pdf". */
+  kind?: UploadKind;
+};
+
 const terminal = (s: SessionStatus): s is "succeeded" | "failed" => s === "succeeded" || s === "failed";
 
-/**
- * Validate, create a session, PUT to the signed URL, start processing and poll
- * until a terminal state. Parser errors ("Invalid ...") propagate as-is.
- */
-export async function runUploadSession(
-  file: Blob,
-  options: { onStatus?: (label: string) => void; signal?: AbortSignal },
-  deps: UploadSessionDeps = {},
-): Promise<UploadSessionResult> {
-  const { onStatus, signal } = options;
-  const callApi = deps.callApi ?? ((path, init) => callUploadApi(path, init));
-  const put = deps.put ?? putToSignedUrl;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
-  const now = deps.now ?? Date.now;
-  const pollMs = deps.pollMs ?? 5_000;
-  const pollLimitMs = deps.pollLimitMs ?? 70 * 60 * 1000;
-  const guard = () => { if (signal?.aborted) throw new Error("Upload cancelled"); };
+/** UploadProgress for a session status plus its latest polled state (null before the first poll). */
+export function sessionProgress(status: SessionStatus, state: SessionState | null, kind?: UploadKind): UploadProgress {
+  const k = state?.kind ?? kind;
+  const base: Pick<UploadProgress, "kind"> = k ? { kind: k } : {};
+  switch (status) {
+    case "created":
+    case "queued":
+      return { ...base, phase: "queued" };
+    case "processing":
+      return { ...base, phase: "processing", stage: state?.stage ?? null, detail: state?.stage_detail ?? null };
+    case "succeeded":
+      return state?.upload_id ? { ...base, phase: "succeeded", uploadId: state.upload_id } : { ...base, phase: "succeeded" };
+    case "failed":
+      return { ...base, phase: "failed", stage: state?.stage ?? null, errorCode: state?.error_code ?? null };
+  }
+}
 
-  guard();
-  onStatus?.("Checking PDF...");
-  const check = await validatePdf(file);
-  if (!check.ok) throw new Error(check.error);
-  guard();
-  onStatus?.("Preparing upload...");
-  const session = parseCreatedSession(await callApi("/api/upload-sessions", { method: "POST", body: { size_bytes: file.size } }));
-  guard();
-  onStatus?.("Uploading 0%");
-  await put(session, file, percent => onStatus?.(`Uploading ${percent}%`), signal);
-  guard();
-  const statusPath = `/api/upload-sessions/${session.session_id}`;
-  let current = parseProcessResult(await callApi(`${statusPath}/process`, { method: "POST" })).status;
-  guard();
+type ClientStep = "checking" | "preparing" | "uploading" | "queued" | "processing";
+
+type Runner = {
+  onStatus?: (label: string) => void;
+  emit: (progress: UploadProgress) => void;
+  kind: UploadKind;
+  callApi: NonNullable<UploadSessionDeps["callApi"]>;
+  put: typeof putToSignedUrl;
+  sleep: (ms: number) => Promise<void>;
+  now: () => number;
+  pollMs: number;
+  pollLimitMs: number;
+  signal?: AbortSignal;
+  guard: () => void;
+  /** Last backend stage seen, kept for failure progress. */
+  stage: SessionStage | null;
+  step: ClientStep;
+};
+
+function runner(options: UploadSessionOptions, deps: UploadSessionDeps, kind: UploadKind): Runner {
+  const { onStatus, onProgress, signal } = options;
+  let last = "";
+  return {
+    onStatus, kind, signal,
+    emit: (progress) => {
+      if (!onProgress) return;
+      const key = JSON.stringify(progress);
+      if (key === last) return;
+      last = key;
+      onProgress(progress);
+    },
+    callApi: deps.callApi ?? ((path, init) => callUploadApi(path, init)),
+    put: deps.put ?? putToSignedUrl,
+    sleep: deps.sleep ?? ((ms: number) => new Promise<void>(done => setTimeout(done, ms))),
+    now: deps.now ?? Date.now,
+    pollMs: deps.pollMs ?? 5_000,
+    pollLimitMs: deps.pollLimitMs ?? 70 * 60 * 1000,
+    guard: () => { if (signal?.aborted) throw new UploadCancelledError(); },
+    stage: null,
+    step: "checking",
+  };
+}
+
+class PollTimeoutError extends Error {}
+
+const CLIENT_ERROR_CODE: Record<ClientStep, string> = {
+  checking: "invalid_file",
+  preparing: "session_failed",
+  uploading: "upload_failed",
+  queued: "process_failed",
+  processing: "poll_failed",
+};
+
+/** Run `body`; an abort becomes UploadCancelledError, anything else emits failure progress first. */
+async function withFailureProgress<T>(r: Runner, body: () => Promise<T>): Promise<T> {
+  try {
+    return await body();
+  } catch (reason) {
+    if (isUploadCancelled(reason, r.signal)) {
+      throw reason instanceof UploadCancelledError ? reason : new UploadCancelledError();
+    }
+    const errorCode = reason instanceof PollTimeoutError
+      ? "poll_timeout"
+      : r.step === "processing" && isSessionNotFoundError(reason) ? "session_not_found" : CLIENT_ERROR_CODE[r.step];
+    r.emit({ kind: r.kind, phase: "failed", stage: r.stage, errorCode });
+    throw reason;
+  }
+}
+
+/** Poll until terminal. `initial` is the status reported by /process, or null to poll immediately. */
+async function pollLoop(r: Runner, sessionId: string, initial: SessionStatus | null): Promise<UploadSessionResult> {
+  const statusPath = `/api/upload-sessions/${sessionId}`;
+  let current: SessionStatus | null = initial;
   let latest: SessionState | null = null;
-  const deadline = now() + pollLimitMs;
+  const deadline = r.now() + r.pollLimitMs;
   let failures = 0;
   for (;;) {
-    onStatus?.(SESSION_STATUS_LABELS[current]);
-    if (terminal(current)) {
-      // The process call only reports a status; fetch the full state once.
-      if (!latest) {
-        latest = parseSessionState(await callApi(statusPath));
-        guard();
-        current = latest.status;
-        if (!terminal(current)) continue;
+    if (current !== null) {
+      r.onStatus?.(SESSION_STATUS_LABELS[current]);
+      if (terminal(current)) {
+        // The process call only reports a status; fetch the full state once.
+        if (!latest) {
+          latest = parseSessionState(await r.callApi(statusPath));
+          r.guard();
+          current = latest.status;
+          if (!terminal(current)) continue;
+        }
+        r.emit(sessionProgress(current, latest, r.kind));
+        return { ...latest, status: current };
       }
-      return { ...latest, status: current };
+      r.emit(sessionProgress(current, latest, r.kind));
+      if (r.now() >= deadline) throw new PollTimeoutError("Processing is taking longer than expected. Check again later.");
+      await r.sleep(r.pollMs);
+      r.guard();
     }
-    if (now() >= deadline) throw new Error("Processing is taking longer than expected. Check again later.");
-    await sleep(pollMs);
-    guard();
     let polled: unknown;
     try {
-      polled = await callApi(statusPath);
+      polled = await r.callApi(statusPath);
     } catch (reason) {
-      guard();
+      r.guard();
       const next = pollFailureAction(failures, reason);
       if (next.action === "fatal") throw reason;
       if (next.action === "give-up") throw new Error(POLL_GAVE_UP_MESSAGE);
       failures = next.consecutive;
+      // Without a first successful poll, wait before retrying.
+      current ??= "queued";
       continue;
     }
-    guard();
+    r.guard();
     failures = 0;
     latest = parseSessionState(polled);
     current = latest.status;
+    if (latest.stage) r.stage = latest.stage;
+    if (latest.kind) r.kind = latest.kind;
   }
+}
+
+/**
+ * Validate, create a session, PUT to the signed URL, start processing and poll
+ * until a terminal state. Parser errors ("Invalid ...") propagate as-is. An
+ * abort always rejects with UploadCancelledError (check isUploadCancelled) and
+ * emits no failure progress; other errors emit a failed UploadProgress first.
+ */
+export async function runUploadSession(
+  file: Blob,
+  options: UploadSessionOptions,
+  deps: UploadSessionDeps = {},
+): Promise<UploadSessionResult> {
+  const kind = options.kind ?? uploadKindOf(file as Blob & { name?: string }) ?? "pdf";
+  const r = runner(options, deps, kind);
+  return withFailureProgress(r, async () => {
+    r.guard();
+    r.onStatus?.(kind === "csv" ? "Checking CSV..." : "Checking PDF...");
+    r.emit({ kind, phase: "checking" });
+    const check = await validateUploadFile(file, kind);
+    if (!check.ok) throw new Error(check.error);
+    r.guard();
+    r.step = "preparing";
+    r.onStatus?.("Preparing upload...");
+    r.emit({ kind, phase: "preparing" });
+    const session = parseCreatedSession(await r.callApi("/api/upload-sessions", {
+      method: "POST", body: { size_bytes: file.size, content_type: UPLOAD_CONTENT_TYPES[kind] },
+    }));
+    if (session.required_headers["Content-Type"] !== UPLOAD_CONTENT_TYPES[kind]) throw new Error("Invalid required_headers");
+    r.guard();
+    r.step = "uploading";
+    r.onStatus?.("Uploading 0%");
+    r.emit({ kind, phase: "uploading", percent: 0 });
+    await r.put(session, file, (percent) => {
+      r.onStatus?.(`Uploading ${percent}%`);
+      r.emit({ kind, phase: "uploading", percent });
+    }, r.signal);
+    r.guard();
+    r.step = "queued";
+    const processed = parseProcessResult(
+      await r.callApi(`/api/upload-sessions/${session.session_id}/process`, { method: "POST" }),
+    ).status;
+    r.guard();
+    r.step = "processing";
+    options.onQueued?.(session.session_id);
+    r.guard();
+    return pollLoop(r, session.session_id, processed);
+  });
+}
+
+/**
+ * Resume polling an existing session (the /summary page). Emits the same
+ * progress as runUploadSession from the queued step on.
+ */
+export async function pollUploadSession(
+  sessionId: string,
+  options: Omit<UploadSessionOptions, "onQueued">,
+  deps: UploadSessionDeps = {},
+): Promise<UploadSessionResult> {
+  if (!SESSION_ID.test(sessionId)) throw new Error("Invalid session_id");
+  const r = runner(options, deps, options.kind ?? "pdf");
+  r.step = "processing";
+  return withFailureProgress(r, async () => {
+    r.guard();
+    return pollLoop(r, sessionId, null);
+  });
 }

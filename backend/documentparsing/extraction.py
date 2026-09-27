@@ -314,8 +314,17 @@ def deduplicate(projects: list[dict]) -> list[dict]:
     return sorted(result.values(), key=lambda p: p["project_id"])
 
 
-def extract_document(path: Path, client, *, utility="", state="", audit_only=False):
-    """Return (normalized projects, audit) for CLI or future A2A callers. No framework imports."""
+def _no_progress(stage, done=None, total=None):
+    """Default progress callback: callers that pass nothing see no behaviour change."""
+
+
+def extract_document(path: Path, client, *, utility="", state="", audit_only=False, progress=None):
+    """Return (normalized projects, audit) for CLI or future A2A callers. No framework imports.
+
+    ``progress(stage, done=None, total=None)`` is an optional observer that is told when the
+    document is staged, parsed and each extraction unit finishes; it must not raise.
+    """
+    progress = progress or _no_progress
     data = validate_document(path)
     digest = hashlib.sha256(data).hexdigest()
     paged = path.suffix.lower() in PAGED_TYPES
@@ -323,7 +332,9 @@ def extract_document(path: Path, client, *, utility="", state="", audit_only=Fal
     with tempfile.TemporaryDirectory(prefix="construction-document-") as directory:
         snapshot = Path(directory) / ("source" + path.suffix.lower())
         snapshot.write_bytes(data)
+        progress("staging")
         staged = client.upload(snapshot, digest)
+    progress("parsing")
     parsed = client.parse(staged, page_split=paged)
     pages = parsed_pages(parsed, paged)
     projects, units, skipped = [], [], []
@@ -358,14 +369,18 @@ def extract_document(path: Path, client, *, utility="", state="", audit_only=Fal
                     page_end = next_page
                     context = f"[Source page {page}]\n{content}\n[Source page {next_page}]\n{next_content}"
             windows.append((page, page_end, context))
-    for page, page_end, context in windows:
-        for start, end, text in chunks(context):
-            raw = client.extract(text, RESPONSE_FORMAT)
-            reference = {"document": path.name, "sha256": digest, "page": page,
-                         "page_end": page_end, "start": start, "end": end}
-            rows = extraction_rows(raw)
-            projects.extend(normalize_project(row, reference, text, utility=utility, state=state) for row in rows)
-            units.append({"source": reference, "result": raw})
+    # chunks() is a generator: materialize every unit first so progress knows the total.
+    work = [(page, page_end, start, end, text)
+            for page, page_end, context in windows for start, end, text in chunks(context)]
+    progress("extracting", 0, len(work))
+    for done, (page, page_end, start, end, text) in enumerate(work, 1):
+        raw = client.extract(text, RESPONSE_FORMAT)
+        reference = {"document": path.name, "sha256": digest, "page": page,
+                     "page_end": page_end, "start": start, "end": end}
+        rows = extraction_rows(raw)
+        projects.extend(normalize_project(row, reference, text, utility=utility, state=state) for row in rows)
+        units.append({"source": reference, "result": raw})
+        progress("extracting", done, len(work))
     # Excluded content is not copied into local JSON artifacts.
     safe_pages = [{"page": page, "content": content} for page, content in pages if not CEII.search(content)]
     projects = deduplicate(projects)

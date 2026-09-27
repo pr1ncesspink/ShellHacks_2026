@@ -5,7 +5,7 @@ import { Brand } from "@/components/brand";
 import { safeNext } from "@/lib/session";
 import { getUser } from "@/lib/server/session";
 
-export const metadata = { title: "Verify Email" };
+export const metadata = { title: "Verify email" };
 
 export default async function VerifyEmailPage({
   searchParams,
@@ -22,14 +22,11 @@ export default async function VerifyEmailPage({
     <div className="login-page">
       <header className="login-header">
         <Brand />
-        <span className="login-header-label">VERIFIED WORKSPACE ACCESS</span>
+        <span className="login-header-label">Verified workspace access</span>
       </header>
       <main id="main-content" className="login-main">
         <section className="login-story">
-          <div className="eyebrow">
-            <span className="tiny-dot" />
-            ONE QUICK CONFIRMATION.
-          </div>
+          <p className="eyebrow">One quick confirmation</p>
           <h1>
             Your inbox <br />
             holds the key. <br />
@@ -38,20 +35,29 @@ export default async function VerifyEmailPage({
           <p>
             Firebase sends a verification link, not a six-digit code.
             <br />
-            Use it, return here, and continue securely.
+            Open it, come back here, and continue.
           </p>
           <div className="signup-benefits">
             <div>
-              <MailCheck size={20} aria-hidden="true" />
+              <MailCheck
+                size={16}
+                aria-hidden="true"
+                className="text-muted-foreground"
+              />
               <span>
                 Follow the email link
                 <small>
-                  Check spam or resend the message after the cooldown.
+                  Check your spam folder, or resend the message after the
+                  cooldown.
                 </small>
               </span>
             </div>
             <div>
-              <ShieldCheck size={20} aria-hidden="true" />
+              <ShieldCheck
+                size={16}
+                aria-hidden="true"
+                className="text-muted-foreground"
+              />
               <span>
                 Protected by default
                 <small>
@@ -63,10 +69,6 @@ export default async function VerifyEmailPage({
         </section>
         <VerifyEmailPanel nextPath={nextPath} />
       </main>
-      <footer className="login-footer">
-        <span>GridLens / Built for better coordination.</span>
-        <span>One connected view.</span>
-      </footer>
     </div>
   );
 }

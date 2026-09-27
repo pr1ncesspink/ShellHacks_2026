@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { Layers3 } from "lucide-react";
 import { SignInForm } from "@/components/auth/sign-in-form";
 import { Brand } from "@/components/brand";
 import { safeNext } from "@/lib/session";
@@ -20,55 +19,29 @@ export default async function LoginPage({
     <div className="login-page">
       <header className="login-header">
         <Brand />
-        <span className="login-header-label">
-          CONSTRUCTION OVERLAP SIMULATOR
-        </span>
+        <span className="login-header-label">Construction overlap simulator</span>
       </header>
       <main id="main-content" className="login-main">
         <section className="login-story">
-          <div className="eyebrow">
-            <span className="tiny-dot" />
-            CONNECTED PROJECTS. CLEARER DECISIONS.
-          </div>
+          <p className="eyebrow">Connected projects, clearer decisions</p>
           <h1>
             Great projects <br />
             start with a <br />
             <span>shared perspective.</span>
           </h1>
           <p>
-            Bring your plans together. Discover the overlap.
-            <br className="desktop-break" /> Build a more coordinated tomorrow.
+            Bring your plans together and see where they overlap,
+            <br className="desktop-break" /> so every crew can plan around the
+            others.
           </p>
-          <div className="architecture-art" aria-hidden="true">
-            <div className="art-orbit orbit-one" />
-            <div className="art-orbit orbit-two" />
-            <div className="plan-layer layer-back">
-              <div className="plan-lines" />
-            </div>
-            <div className="plan-layer layer-middle">
-              <div className="plan-lines" />
-            </div>
-            <div className="plan-layer layer-front">
-              <div className="plan-lines" />
-              <span className="art-node" />
-            </div>
-            <span className="art-caption">
-              <Layers3 size={14} />
-              Clarity, layer by layer.
-            </span>
-          </div>
-          <div className="story-bottom">
-            <span>01 / CONNECT</span>
-            <span>02 / VERIFY</span>
-            <span>03 / COORDINATE</span>
-          </div>
+          <ol className="story-bottom" aria-label="How GridLens works">
+            <li>1. Connect</li>
+            <li>2. Verify</li>
+            <li>3. Coordinate</li>
+          </ol>
         </section>
         <SignInForm nextPath={nextPath} />
       </main>
-      <footer className="login-footer">
-        <span>GridLens / Built for better coordination.</span>
-        <span>One connected view.</span>
-      </footer>
     </div>
   );
 }

@@ -1,15 +1,10 @@
-import {
-  ArrowUpRight,
-  Info,
-} from "lucide-react";
+import { CircleAlert, Database, FlaskConical, RotateCw } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
-import {
-  PageHeading,
-  WorkspaceFooter,
-} from "@/components/workspace";
+import { PageHeading } from "@/components/workspace";
 import { FileUpload } from "@/components/file-upload";
 import { ProjectMap } from "@/components/project-map";
 import { Card } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { getDashboardData } from "@/lib/backend";
 import { summarize } from "@/lib/overlaps";
@@ -17,6 +12,48 @@ import { requireUser } from "@/lib/server/session";
 
 export const metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
+
+const BANDS = [
+  { label: "High similarity", range: "0.75 – 1.00", bar: "bg-chart-1" },
+  { label: "Moderate similarity", range: "0.50 – < 0.75", bar: "bg-chart-2" },
+  { label: "Lower similarity", range: "−1.00 – < 0.50", bar: "bg-chart-3" },
+] as const;
+
+function DataStatus({ mode }: { mode: "example" | "error" | "live" }) {
+  if (mode === "error") {
+    return (
+      <Alert variant="destructive">
+        <CircleAlert aria-hidden="true" />
+        <AlertTitle>Project data unavailable</AlertTitle>
+        <AlertDescription>
+          <p>We couldn’t load project data. Check your backend connection and try again.</p>
+          <a href="/dashboard" className="inline-flex items-center gap-1 font-medium text-primary-text underline-offset-4 hover:underline">
+            <RotateCw size={16} aria-hidden="true" />
+            Try again
+          </a>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  const example = mode === "example";
+  return (
+    <Alert variant={example ? "info" : "success"}>
+      {example ? <FlaskConical aria-hidden="true" /> : <Database aria-hidden="true" />}
+      <AlertTitle className="flex items-center gap-2">
+        Data source
+        <Badge variant={example ? "info" : "success"}>{example ? "Example data" : "Live data"}</Badge>
+      </AlertTitle>
+      <AlertDescription>
+        <p>
+          {example
+            ? "Overlap statistics use example data. The map shows locations from your project CSV."
+            : "Live project data from your connected backend."}
+        </p>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 export default async function DashboardPage() {
   const user = await requireUser("/dashboard");
   const data = await getDashboardData(user);
@@ -38,40 +75,20 @@ export default async function DashboardPage() {
     <>
       <SiteHeader active="dashboard" user={user} />
       <main id="main-content" className="workspace">
-        <PageHeading />
+        <PageHeading
+          section="Dashboard"
+          title="Every overlap. One clear view."
+          description="Understand where your projects connect, and where to look next."
+        />
         <section className="upload-section upload-section-first" aria-label="Construction plans">
           <FileUpload />
         </section>
-        <div className={`data-banner ${failed ? "error-banner" : ""}`}>
-          <span>
-            <Info size={15} aria-hidden="true" />
-            {data.mode === "example"
-              ? "Overlap statistics use example data. The map shows locations from your project CSV."
-              : failed
-                ? "We couldn’t load project data. Check your backend connection and try again."
-                : "Live project data from your connected backend."}
-          </span>
-          {failed ? (
-            <a href="/dashboard" className="retry-link">
-              Try again <ArrowUpRight size={14} aria-hidden="true" />
-            </a>
-          ) : (
-            <Badge
-              variant="outline"
-              className={
-                data.mode === "example" ? "example-badge" : "live-badge"
-              }
-            >
-              <span className="tiny-dot" />
-              {data.mode === "example" ? "EXAMPLE DATA" : "LIVE DATA"}
-            </Badge>
-          )}
-        </div>
         <div className="dashboard-grid">
           <section
             aria-label="Project overlap statistics"
             className="stats-column"
           >
+            <DataStatus mode={data.mode} />
             <div className="metrics-grid">
               {metrics.map(({ label, value, caption }) => (
                 <Card key={label} className="metric-card panel">
@@ -86,32 +103,15 @@ export default async function DashboardPage() {
             <Card className="distribution-card panel">
               <div className="panel-heading">
                 <div>
-                  <span className="eyebrow">CONNECTION STRENGTH</span>
+                  <span className="eyebrow">Connection strength</span>
                   <h2>Similarity at a glance</h2>
                 </div>
               </div>
               <div className="band-list">
-                {[
-                  {
-                    label: "High similarity",
-                    range: "0.75 – 1.00",
-                    tone: "blue",
-                  },
-                  {
-                    label: "Moderate similarity",
-                    range: "0.50 – < 0.75",
-                    tone: "teal",
-                  },
-                  {
-                    label: "Lower similarity",
-                    range: "−1.00 – < 0.50",
-                    tone: "violet",
-                  },
-                ].map((band, i) => (
+                {BANDS.map((band, i) => (
                   <div className="band" key={band.label}>
                     <div className="band-label">
                       <span>
-                        <i className={`legend-dot bg-${band.tone}`} />
                         {band.label}
                         <small>{band.range}</small>
                       </span>
@@ -121,7 +121,7 @@ export default async function DashboardPage() {
                     </div>
                     <div className="band-track" aria-hidden="true">
                       <div
-                        className={`bg-${band.tone}`}
+                        className={band.bar}
                         style={{
                           width: `${stats.pairs ? (stats.bands[i] / stats.pairs) * 100 : 0}%`,
                         }}
@@ -138,7 +138,6 @@ export default async function DashboardPage() {
           </section>
           <ProjectMap />
         </div>
-        <WorkspaceFooter />
       </main>
     </>
   );

@@ -16,8 +16,17 @@ def seed_reference(path, store):
     return store.load_reference(dataset_id, points)
 
 
-def process_plan(path, store, client, *, utility="", state="", osm_snapshot=None):
-    """Parse, persist uploaded points, match reference points, and publish collisions."""
+def _no_progress(stage, done=None, total=None):
+    """Default progress callback: callers that pass nothing see no behaviour change."""
+
+
+def process_plan(path, store, client, *, utility="", state="", osm_snapshot=None, progress=None):
+    """Parse, persist uploaded points, match reference points, and publish collisions.
+
+    ``progress(stage, done=None, total=None)`` optionally observes the stages
+    (staging, parsing, extracting, locating for documents; matching, saving always).
+    """
+    progress = progress or _no_progress
     from backend.documentparsing.extraction import Project
     from backend.documentparsing.pipeline import run_pipeline
 
@@ -34,11 +43,13 @@ def process_plan(path, store, client, *, utility="", state="", osm_snapshot=None
         else:
             audit = run_pipeline([path], temporary, client=client, utility=utility, state=state,
                                  osm_snapshot=osm_snapshot, cache_dir=Path(temporary) / "geocoding",
-                                 compute_overlaps=False)
+                                 compute_overlaps=False, progress=progress)
             projects = json.loads((Path(temporary) / "projects.json").read_text(encoding="utf-8"))
+    progress("matching")
     points = parsed_points(projects)
     upload_id = "UPL_" + uuid4().hex
     result = find_collisions(upload_id, reference_id, points, reference)
+    progress("saving")
     manifest = store.save_upload(upload_id, points, result, audit)
     return {**manifest, "collisions": result["collisions"]}
 

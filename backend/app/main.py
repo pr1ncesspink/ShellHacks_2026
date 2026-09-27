@@ -10,6 +10,7 @@ from backend.app.api.routes.overlaps import router as overlaps_router
 from backend.app.api.routes.similarity import router as similarity_router
 from backend.app.api.routes.projects import router as projects_router
 from backend.app.api.routes.upload_sessions import router as upload_sessions_router
+from backend.app.api.routes.upload_summary import router as upload_summary_router
 from backend.app.core.config import get_settings
 from backend.app.services.rate_limiter import AgentRateLimiter
 
@@ -22,6 +23,7 @@ def create_app() -> FastAPI:
     app.include_router(collisions_router)
     app.include_router(projects_router)
     app.include_router(upload_sessions_router)
+    app.include_router(upload_summary_router)
     app.include_router(map_analysis_router)
     settings = get_settings()
     if settings.agent_rate_limit_per_client or settings.agent_rate_limit_total:

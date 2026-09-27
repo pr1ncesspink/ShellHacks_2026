@@ -43,7 +43,7 @@ export async function readSmallJson(request: NextRequest): Promise<{ value: unkn
 
 export async function forward(
   context: Context,
-  options: Pick<ProxyOptions, "path" | "init" | "parse">,
+  options: Pick<ProxyOptions, "path" | "init" | "parse" | "messages">,
 ): Promise<NextResponse> {
   try {
     const token = context.config.auth === "google-oidc" ? await getGoogleIdToken(context.config) : undefined;

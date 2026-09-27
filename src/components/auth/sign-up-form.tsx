@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowRight, LockKeyhole, ShieldCheck, UserPlus } from "lucide-react";
+import { ArrowRight, LockKeyhole, ShieldCheck } from "lucide-react";
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
@@ -117,11 +117,8 @@ export function SignUpForm() {
   return (
     <Card className="login-card panel">
       <div className="login-card-top">
-        <span className="icon-tile violet">
-          <UserPlus size={23} aria-hidden="true" />
-        </span>
         <Badge variant="outline" className="muted-badge">
-          OPEN SIGN-UP
+          Open sign-up
         </Badge>
       </div>
       <h2>Create your account.</h2>
@@ -170,10 +167,10 @@ export function SignUpForm() {
             <h3>Next: verify your email</h3>
             <p>We’ll send Firebase’s verification link after sign-up.</p>
           </div>
-          <ShieldCheck size={17} aria-hidden="true" />
+          <ShieldCheck size={16} aria-hidden="true" />
         </div>
         <div className="auth-notice">
-          <LockKeyhole size={14} aria-hidden="true" />
+          <LockKeyhole size={16} aria-hidden="true" />
           <span>No workspace session is created before email verification.</span>
         </div>
         {error ? (

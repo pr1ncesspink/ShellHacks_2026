@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { proxyBackend, sessionPath, type LiveBackendConfig, type ProxyOptions } from "./upload-proxy.ts";
+import { UPLOAD_ROUTE_MESSAGES, proxyBackend, sessionPath, type LiveBackendConfig, type ProxyOptions } from "./upload-proxy.ts";
 import { parseProcessResult, parseSessionState } from "./upload-sessions.ts";
 
 const ID = `SES_${"0f".repeat(16)}`;
@@ -98,4 +98,24 @@ test("invalid session ids never build a path or fetch", async () => {
     await assert.rejects(run(impl, { path }));
   }
   assert.equal(calls.length, 0);
+});
+
+test("upload-session routes keep the default pass-through copy", async () => {
+  const notFound = await run(fakeFetch(404).impl);
+  assert.deepEqual(notFound.body, { error: "Upload session not found." });
+  const invalid = await run(fakeFetch(422).impl);
+  assert.deepEqual(invalid.body, { error: "The upload request or PDF was rejected." });
+});
+
+test("per-route messages override pass-through copy without changing statuses", async () => {
+  const opts = { path: "projects/uploads", init: { method: "GET" as const }, parse: (v: unknown) => v, messages: UPLOAD_ROUTE_MESSAGES };
+  const notFound = await run(fakeFetch(404).impl, opts);
+  assert.deepEqual(notFound, { status: 404, body: { error: "Upload not found." } });
+  const invalid = await run(fakeFetch(422).impl, opts);
+  assert.deepEqual(invalid, { status: 422, body: { error: "Invalid upload id." } });
+  // Statuses without an override fall back to the default copy; others still map to 502.
+  const conflict = await run(fakeFetch(409).impl, opts);
+  assert.deepEqual(conflict, { status: 409, body: { error: "The PDF has not finished uploading." } });
+  const server = await run(fakeFetch(500).impl, { ...opts, messages: { 404: "x" } });
+  assert.deepEqual(server, { status: 502, body: { error: "Upload backend unavailable. Try again shortly." } });
 });

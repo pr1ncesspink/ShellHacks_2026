@@ -51,7 +51,7 @@ export function SignOutButton({
     <Button {...props} type="button" onClick={handleSignOut} disabled={busy}>
       {children ?? (
         <>
-          <LogOut aria-hidden="true" />
+          <LogOut size={16} aria-hidden="true" />
           {busy ? "Signing out…" : "Sign out"}
         </>
       )}

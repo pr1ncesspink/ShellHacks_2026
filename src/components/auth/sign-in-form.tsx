@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
-import { ArrowRight, Fingerprint, LockKeyhole, ShieldCheck } from "lucide-react";
+import { ArrowRight, LockKeyhole, ShieldCheck } from "lucide-react";
 import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -91,11 +91,8 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
   return (
     <Card className="login-card panel">
       <div className="login-card-top">
-        <span className="icon-tile blue">
-          <Fingerprint size={25} aria-hidden="true" />
-        </span>
         <Badge variant="outline" className="muted-badge">
-          SECURE SIGN IN
+          Secure sign-in
         </Badge>
       </div>
       <h2>Your workspace awaits.</h2>
@@ -151,10 +148,10 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
             <h3>Verify your email</h3>
             <p>Workspace access begins after you use Firebase’s email link.</p>
           </div>
-          <ShieldCheck size={17} aria-hidden="true" />
+          <ShieldCheck size={16} aria-hidden="true" />
         </div>
         <div className="auth-notice">
-          <LockKeyhole size={14} aria-hidden="true" />
+          <LockKeyhole size={16} aria-hidden="true" />
           <span>Your workspace stays locked until your email is verified.</span>
         </div>
         {error ? (
@@ -169,13 +166,13 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
         ) : null}
         <Button type="submit" className="preview-button" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
-          <ArrowRight size={17} aria-hidden="true" />
+          <ArrowRight size={16} aria-hidden="true" />
         </Button>
       </form>
       <p className="account-switch">
         New to GridLens?{" "}
         <Link href="/signup">
-          Create an account <ArrowRight size={13} aria-hidden="true" />
+          Create an account <ArrowRight size={16} aria-hidden="true" />
         </Link>
       </p>
     </Card>
