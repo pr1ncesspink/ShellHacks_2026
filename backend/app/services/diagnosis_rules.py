@@ -21,6 +21,8 @@ def allowed_verdicts(overlap: Any, thresholds: Thresholds) -> tuple[Verdict, ...
         raise ValueError("time_gap_days must be non-negative")
     if overlap.distance_mi > thresholds.max_distance_mi or overlap.time_gap_days > thresholds.max_gap_days:
         return ("NO_ACTION",)
+    if getattr(overlap, "timing_basis", "exact_dates") == "timing_unknown":
+        return ("RESEQUENCE",)
     if overlap.name_similarity >= thresholds.co_schedule_min_similarity:
         return ("CO_SCHEDULE", "RESEQUENCE")
     return ("RESEQUENCE",)

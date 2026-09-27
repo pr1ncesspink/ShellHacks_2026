@@ -116,6 +116,22 @@ Each collision includes `overlap_id`, `distance_mi`, nullable `time_gap_days`,
 `uploaded_project`, and `reference_project` (coordinates, owner, scope text, dates,
 precision, and source data). It never substitutes zero days for an unknown schedule.
 
+`POST /projects/uploads/{upload_id}/collisions/{overlap_id}/diagnosis` diagnoses one
+stored collision with the guarded Gemini diagnosis flow. The request body is empty.
+The response contains `upload_id`, `overlap_id`, `timing_basis`, `missing_dates`, and
+the existing `DiagnosisEnvelope` under `diagnosis`. Repeating the same request uses
+the diagnosis cache. Missing project owners are shown as `Unknown utility`.
+
+| Diagnosis timing tier | Stored collision fields | Diagnosis gap and verdict rule |
+| --- | --- | --- |
+| `exact_dates` | Integer `time_gap_days` | Use the stored day gap; existing verdict rules apply. |
+| `year_precision` | Null gap; both projects have an exact date or estimated year | Use `max(0, abs(year_a - year_b) - 1) * 365`; existing verdict rules apply. |
+| `timing_unknown` | Null gap; either project has no date or year | Use zero as a rule input, list sides missing dates in `missing_dates`, and exclude `CO_SCHEDULE`. |
+
+The reference CSV contains year-only dates. An upload with an exact date or estimated
+year therefore normally uses `year_precision`; an upload with no date or year uses
+`timing_unknown`. The stored `collisions-v1` payload is not changed.
+
 With `ENABLE_A2A=1`, the existing overlap agent exposes `get_upload_collisions`.
 Pass the returned upload ID in the agent request. The tool reads the new dataset and
 adds `semantic_similarity` using the existing encoder on project name plus available

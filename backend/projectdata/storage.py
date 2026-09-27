@@ -141,3 +141,20 @@ class ProjectStore:
         return {**manifest, "collisions": [json_object(row[0], "collision") for row in collisions],
                 "offset": offset, "limit": limit,
                 "next_offset": offset + limit if offset + limit < manifest["collision_count"] else None}
+
+    def collision(self, upload_id, overlap_id):
+        validate_upload_id(upload_id)
+        if not isinstance(overlap_id, str) or not re.fullmatch(r"COL_[a-f0-9]{24}", overlap_id):
+            raise ValueError("Invalid overlap_id")
+        manifest = self.client.query_rows(
+            f"SELECT TO_JSON(PAYLOAD) FROM {self.table('uploads', 'DATASETS')} WHERE DATASET_ID=?",
+            (upload_id,), context=False)
+        if not manifest:
+            raise LookupError("Upload not found or processing did not complete")
+        rows = self.client.query_rows(
+            f"SELECT TO_JSON(PAYLOAD) FROM {self.table('uploads', 'COLLISIONS')} "
+            "WHERE UPLOAD_ID=? AND COLLISION_ID=?",
+            (upload_id, overlap_id), context=False)
+        if not rows:
+            raise LookupError("Collision not found")
+        return json_object(rows[0][0], "collision")

@@ -73,38 +73,50 @@ class CollisionPipeline:
 
     async def diagnose(self, overlap_id: str) -> DiagnosisEnvelope:
         diagnosis_input, eligible = self._input(overlap_id)
-        key = cache_key(diagnosis_input, self.model_id, self.prompt_version)
-        cached = self._cache.get(key)
+        return await run_diagnosis(
+            diagnosis_input, eligible, overlap_id=overlap_id, client=self.client,
+            thresholds=self.thresholds, model_id=self.model_id, prompt_version=self.prompt_version,
+            cache=self._cache, locks=self._locks,
+        )
+
+
+async def run_diagnosis(
+    diagnosis_input: DiagnosisInput, eligible: bool | None, *, overlap_id: str,
+    client: DiagnosisClient, thresholds: Thresholds, model_id: str, prompt_version: str,
+    cache: dict[str, DiagnosisEnvelope], locks: dict[str, asyncio.Lock],
+) -> DiagnosisEnvelope:
+    key = cache_key(diagnosis_input, model_id, prompt_version)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached.model_copy(update={"cached": True})
+    lock = locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        cached = cache.get(key)
         if cached is not None:
             return cached.model_copy(update={"cached": True})
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        async with lock:
-            cached = self._cache.get(key)
-            if cached is not None:
-                return cached.model_copy(update={"cached": True})
-            result = await self.client.diagnose(diagnosis_input)
-            if result.status == "rejected_input":
-                decision = DiagnosisDecision(
-                    verdict=diagnosis_input.allowed_verdicts[-1], rationale="Diagnosis input was rejected."
-                )
-                envelope = DiagnosisEnvelope(
-                    overlap_id=overlap_id, verdict=decision.verdict, rationale=decision.rationale,
-                    suggested_actions=[], allowed_verdicts=diagnosis_input.allowed_verdicts,
-                    rule_reason="rejected_input", overridden=True, status="rejected_input",
-                    context_used=bool(diagnosis_input.project_a or diagnosis_input.project_b),
-                    snowflake_eligible=eligible, model=self.model_id, prompt_version=self.prompt_version,
-                    input_hash=key, cached=False,
-                )
-            else:
-                guarded = guard(result.decision, diagnosis_input.overlap, self.thresholds)
-                envelope = DiagnosisEnvelope(
-                    overlap_id=overlap_id, verdict=guarded.decision.verdict, rationale=guarded.decision.rationale,
-                    suggested_actions=guarded.decision.suggested_actions,
-                    allowed_verdicts=diagnosis_input.allowed_verdicts, rule_reason=guarded.rule_reason,
-                    overridden=guarded.overridden, status=guarded.status,
-                    context_used=bool(diagnosis_input.project_a or diagnosis_input.project_b),
-                    snowflake_eligible=eligible, model=self.model_id, prompt_version=self.prompt_version,
-                    input_hash=key, cached=False,
-                )
-            self._cache[key] = envelope
-            return envelope
+        result = await client.diagnose(diagnosis_input)
+        if result.status == "rejected_input":
+            decision = DiagnosisDecision(
+                verdict=diagnosis_input.allowed_verdicts[-1], rationale="Diagnosis input was rejected."
+            )
+            envelope = DiagnosisEnvelope(
+                overlap_id=overlap_id, verdict=decision.verdict, rationale=decision.rationale,
+                suggested_actions=[], allowed_verdicts=diagnosis_input.allowed_verdicts,
+                rule_reason="rejected_input", overridden=True, status="rejected_input",
+                context_used=bool(diagnosis_input.project_a or diagnosis_input.project_b),
+                snowflake_eligible=eligible, model=model_id, prompt_version=prompt_version,
+                input_hash=key, cached=False,
+            )
+        else:
+            guarded = guard(result.decision, diagnosis_input.overlap, thresholds)
+            envelope = DiagnosisEnvelope(
+                overlap_id=overlap_id, verdict=guarded.decision.verdict, rationale=guarded.decision.rationale,
+                suggested_actions=guarded.decision.suggested_actions,
+                allowed_verdicts=diagnosis_input.allowed_verdicts, rule_reason=guarded.rule_reason,
+                overridden=guarded.overridden, status=guarded.status,
+                context_used=bool(diagnosis_input.project_a or diagnosis_input.project_b),
+                snowflake_eligible=eligible, model=model_id, prompt_version=prompt_version,
+                input_hash=key, cached=False,
+            )
+        cache[key] = envelope
+        return envelope

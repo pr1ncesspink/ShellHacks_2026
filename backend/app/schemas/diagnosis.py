@@ -13,6 +13,7 @@ from backend.app.schemas.overlaps import ScoredOverlap
 
 Verdict = Literal["CO_SCHEDULE", "RESEQUENCE", "NO_ACTION"]
 DiagnosisStatus = Literal["model", "rule_only", "rejected_input"]
+TimingBasis = Literal["exact_dates", "year_precision", "timing_unknown"]
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _STRING_LIMIT = 512
@@ -78,6 +79,7 @@ class DiagnosisOverlap(BaseModel):
     overlap_id: str
     distance_mi: float = Field(ge=0)
     time_gap_days: int = Field(ge=0)
+    timing_basis: TimingBasis = "exact_dates"
     utility_a: str
     project_id_a: str
     project_name_a: str
@@ -137,6 +139,14 @@ class DiagnosisEnvelope(BaseModel):
     prompt_version: str
     input_hash: str
     cached: bool
+
+
+class UploadDiagnosisResult(BaseModel):
+    upload_id: str
+    overlap_id: str
+    timing_basis: TimingBasis
+    missing_dates: list[str]
+    diagnosis: DiagnosisEnvelope
 
 
 class DiagnoseRequest(BaseModel):
