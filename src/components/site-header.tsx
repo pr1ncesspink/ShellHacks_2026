@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { LayoutDashboard, ChartNoAxesCombined, LogOut } from "lucide-react";
+import { LayoutDashboard, LogOut } from "lucide-react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { Brand } from "@/components/brand";
 
@@ -29,13 +29,6 @@ export function SiteHeader({
           >
             <LayoutDashboard size={16} aria-hidden="true" />
             Dashboard
-          </Link>
-          <Link
-            href="/budget"
-            aria-current={active === "budget" ? "page" : undefined}
-          >
-            <ChartNoAxesCombined size={17} aria-hidden="true" />
-            Budget summary
           </Link>
         </nav>
         <div className="profile-area">
@@ -66,6 +59,7 @@ export function SiteHeader({
             title="Sign out"
           >
             <LogOut size={17} aria-hidden="true" />
+            <span className="sr-only">Sign out</span>
           </SignOutButton>
         </div>
       </div>

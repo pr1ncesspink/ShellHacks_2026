@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     "A clearer view of construction project overlap and coordination.",
   icons: { icon: "/gridlens-mark.svg" },
 };
-export const viewport: Viewport = { themeColor: "#000000" };
+export const viewport: Viewport = { themeColor: "#101d30" };
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -22,7 +22,7 @@ export default async function RootLayout({
         </a>
         {!preview && <SessionSync />}
         {preview && (
-          <div className="bg-[#000000] px-4 py-2 text-center text-xs text-[#8a9597]">
+          <div className="bg-[#101d30] px-4 py-2 text-center text-xs text-[#8a9597]">
             Local design preview · Production sign-in remains enabled
           </div>
         )}
