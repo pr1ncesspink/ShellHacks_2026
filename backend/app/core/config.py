@@ -31,6 +31,20 @@ class Settings:
     diag_max_distance_mi: float = 15.0
     diag_max_gap_days: int = 1095
     diag_co_schedule_min_sim: float = 0.45
+    agent_rate_limit_per_client: int = 45
+    agent_rate_limit_total: int = 25
+    rate_limit_trusted_proxy_hops: int = 1
+    rate_limit_user_header: str = ""
+
+
+def _nonneg_int(name: str, default: int) -> int:
+    try:
+        value = int(getenv(name, str(default)))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a nonnegative integer") from exc
+    if value < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    return value
 
 
 def get_settings() -> Settings:
@@ -54,4 +68,8 @@ def get_settings() -> Settings:
         diag_max_distance_mi=float(getenv("DIAG_MAX_DISTANCE_MI", "15.0")),
         diag_max_gap_days=int(getenv("DIAG_MAX_GAP_DAYS", "1095")),
         diag_co_schedule_min_sim=float(getenv("DIAG_CO_SCHEDULE_MIN_SIM", "0.45")),
+        agent_rate_limit_per_client=_nonneg_int("AGENT_RATE_LIMIT_PER_CLIENT", 45),
+        agent_rate_limit_total=_nonneg_int("AGENT_RATE_LIMIT_TOTAL", 25),
+        rate_limit_trusted_proxy_hops=_nonneg_int("RATE_LIMIT_TRUSTED_PROXY_HOPS", 1),
+        rate_limit_user_header=getenv("RATE_LIMIT_USER_HEADER", "").strip(),
     )

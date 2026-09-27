@@ -80,6 +80,32 @@ Private access is the default. Public access requires explicit owner approval
 and `CLOUDRUN_PUBLIC=1`; that setting makes the service reachable by anyone on
 the internet.
 
+## Agent limits and private user headers
+
+The next human-run deploy uses `--max-instances=3`. Agent POST requests have
+in-memory sliding 60-second limits of `AGENT_RATE_LIMIT_PER_CLIENT=45` per
+client and `AGENT_RATE_LIMIT_TOTAL=25` total per instance. Across three instances,
+the accepted fleet ceiling is `3 x 25 = 75` agent requests/minute; counters are
+not shared and reset when instances restart. A value of `0` disables that limit,
+and both `0` disables the middleware. Invalid negative or non-integer numeric
+settings fail startup. Excess requests receive HTTP 429 and `Retry-After`
+before an agent runs; ordinary API requests and agent-card GETs remain available.
+
+`RATE_LIMIT_USER_HEADER` defaults to empty. Set it to `X-Authenticated-User`
+**only while Cloud Run is private** (`--no-allow-unauthenticated`,
+`CLOUDRUN_PUBLIC=0`), matching `HARNESS-NEXT-FRONTEND-001`. Cloud Run IAM admits
+the Vercel server's service account; Next.js verifies Firebase users and forwards
+their UID. That private boundary guarantees who supplied the trusted header.
+Disable the header before any approved switch to public access. Missing or
+malformed UIDs fall back to the client IP; accepted UIDs contain 1–128 ASCII
+letters, digits, underscores, or hyphens. `RATE_LIMIT_TRUSTED_PROXY_HOPS=1`
+defaults to the rightmost `X-Forwarded-For` entry. Setting it to `0`, or receiving
+too few entries, uses the connection IP (`unknown` when absent).
+
+The commented runtime values in `cloudrun.env.example` document this contract;
+`cloudrun.sh` does not forward them from that file. A human must configure the
+live runtime environment and run deployment for these settings to take effect.
+
 ## Troubleshooting
 
 - `PERMISSION_DENIED` naming `run.services.create` or `setIamPolicy` means the
