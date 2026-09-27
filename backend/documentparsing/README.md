@@ -8,7 +8,9 @@ Pydantic validates and normalizes the resulting records before exporting JSON.
 The existing workbook identity matcher, conservative endpoint resolver and geographic
 overlap calculation are reused. The module has no FastAPI, ADK, or A2A imports;
 an agent can call `extract_document(path, client)` or `run_pipeline(...)` directly.
-Network A2A endpoints and collision database tables are a subsequent integration step.
+`backend.projectdata` now composes this parser with separate Snowflake reference/upload
+databases, BallTree collision matching, upload API routes, and an A2A retrieval tool.
+See [the project dataset pipeline](../projectdata/README.md) for setup and commands.
 
 ## Pipeline ownership
 

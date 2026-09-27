@@ -7,6 +7,7 @@ from backend.app.api.routes.health import router as health_router
 from backend.app.api.routes.collisions import router as collisions_router
 from backend.app.api.routes.overlaps import router as overlaps_router
 from backend.app.api.routes.similarity import router as similarity_router
+from backend.app.api.routes.projects import router as projects_router
 from backend.app.core.config import get_settings
 from backend.app.services.rate_limiter import AgentRateLimiter
 
@@ -16,7 +17,11 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(similarity_router)
     app.include_router(overlaps_router)
+<<<<<<< HEAD
     app.include_router(collisions_router)
+=======
+    app.include_router(projects_router)
+>>>>>>> 4703c9519982dc89c8dc261f1f1c11cdd22338aa
     settings = get_settings()
     if settings.agent_rate_limit_per_client or settings.agent_rate_limit_total:
         app.add_middleware(

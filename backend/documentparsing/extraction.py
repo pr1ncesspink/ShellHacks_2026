@@ -31,6 +31,8 @@ COLUMNS = {
     "published_project_id": "Published identifier for this project, if explicitly stated.",
     "utility": "Full name of the utility or organization responsible for this project.",
     "state": "US state abbreviation of this project, if stated.",
+    "latitude": "Explicit project point latitude in decimal degrees, only if printed in the source. Never infer from a place name.",
+    "longitude": "Explicit project point longitude in decimal degrees, paired with latitude. Preserve negative signs. Never geocode or infer.",
     "description": "Project work scope, retaining asset, equipment and resource details, at most 80 words.",
     "need": "Reason for the project, at most 40 words.",
     "status": "Published project status.",
@@ -61,6 +63,8 @@ class Project(BaseModel):
     utility: str | None = None
     state: str | None = None
     published_project_id: str | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     name_a: str | None = None
     name_b: str | None = None
     lat_a: float | None = Field(default=None, ge=-90, le=90)
@@ -210,6 +214,16 @@ def normalize_project(raw: dict, reference: dict, text: str, *, utility="", stat
     values["utility"] = values.get("utility") or utility or None
     values["state"] = values.get("state") or state or None
     warnings = []
+    from .locations import valid_point
+    try:
+        lat = float(values["latitude"]) if values.get("latitude") is not None else None
+        lon = float(values["longitude"]) if values.get("longitude") is not None else None
+    except (ValueError, TypeError):
+        lat = lon = None
+    if (values.get("latitude") is not None or values.get("longitude") is not None) and not valid_point(lat, lon):
+        warnings.append("invalid_document_coordinates")
+        lat = lon = None
+    values.update(latitude=lat, longitude=lon)
     if not values["utility"]:
         warnings.append("missing_utility")
     raw_date = values.get("in_service_date")
@@ -279,7 +293,7 @@ def deduplicate(projects: list[dict]) -> list[dict]:
             previous["in_service_date"] = previous["dates"][0]
         else:
             previous["in_service_date"] = None
-        for field in ("project_name", "name_a", "name_b", "state", "total_cost", "previous_cost", "line_length_mi"):
+        for field in ("project_name", "name_a", "name_b", "state", "total_cost", "previous_cost", "line_length_mi", "latitude", "longitude"):
             left, right = previous.get(field), project.get(field)
             if left is not None and right is not None and left != right:
                 previous["warnings"].append(f"conflicting_{field}")
@@ -287,6 +301,8 @@ def deduplicate(projects: list[dict]) -> list[dict]:
                     previous[field] = None
             elif left is None and f"conflicting_{field}" not in previous["warnings"]:
                 previous[field] = right
+        if "conflicting_latitude" in previous["warnings"] or "conflicting_longitude" in previous["warnings"]:
+            previous["latitude"] = previous["longitude"] = None
         for field in ("description", "need", "status", "asset_type"):
             if not previous.get(field):
                 previous[field] = project.get(field)
