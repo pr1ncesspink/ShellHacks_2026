@@ -4,16 +4,21 @@ Phase B begins only after the project owner has created a dedicated GCP project,
 linked billing, and decided that this service may be deployed there. Do not use a
 personal project as a temporary target.
 
-Grant the deployer's own Google account these project-level roles before they run
-the script:
+## Owner console steps
 
-- `roles/run.admin`
-- `roles/artifactregistry.admin` (or `roles/artifactregistry.writer` after the
-  repository exists)
-- `roles/cloudbuild.builds.editor`
-- `roles/serviceusage.serviceUsageAdmin` (only when the deployer runs `setup`)
-- `roles/iam.serviceAccountUser` on the default Compute Engine service account
-- `roles/storage.admin` for Cloud Build's source bucket
+In the Google Cloud console, the project owner opens **IAM & Admin** → **IAM**
+→ **Grant access**, adds the deployer's Gmail address, and grants these six
+project-level roles:
+
+- Cloud Run Admin (`roles/run.admin`)
+- Service Account User (`roles/iam.serviceAccountUser`)
+- Cloud Build Editor (`roles/cloudbuild.builds.editor`)
+- Artifact Registry Administrator (`roles/artifactregistry.admin`)
+- Storage Admin (`roles/storage.admin`)
+- Service Usage Admin (`roles/serviceusage.serviceUsageAdmin`)
+
+The owner then sends the deployer the Project ID. No other console pages or
+buttons are needed for routine setup.
 
 The owner can instead run `setup` themselves. In that case the deployer needs
 `roles/run.admin`, `roles/artifactregistry.writer`,
@@ -41,20 +46,61 @@ owner adds the deployer's Google account as an IAM principal; the deployer signs
 in with that account through `gcloud auth login` in the dedicated `shellhacks`
 configuration.
 
-After the roles are granted, the deployer copies `cloudrun.env.example` to the
-local-only `cloudrun.env`, sets `GCP_PROJECT_ID`, and runs:
+## First private deploy
 
-Before the default `PUBLIC=1` deploy, confirm with the owner that public,
-unauthenticated access is approved. Otherwise set `PUBLIC=0`.
+After the roles are granted, the deployer runs these commands in Git Bash from
+the repository root. They copy `cloudrun.env.example` to the local-only
+`cloudrun.env`, set the owner-provided project ID, and leave
+`CLOUDRUN_PUBLIC=0`:
 
 ```bash
+cp backend/deploy/cloudrun.env.example backend/deploy/cloudrun.env
+# Set GCP_PROJECT_ID=OWNER_PROJECT_ID in backend/deploy/cloudrun.env.
+bash backend/deploy/cloudrun.sh --dry-run deploy
 bash backend/deploy/cloudrun.sh login
 bash backend/deploy/cloudrun.sh setup
 bash backend/deploy/cloudrun.sh deploy
+curl -i "$(bash backend/deploy/cloudrun.sh url)/health"
 ```
 
-`deploy` defaults to a public service for the frontend. If organization policy
-blocks granting `allUsers` the invoker role, set `PUBLIC=0` and arrange an
-authenticated caller before deploying. Missing billing, API permissions, or
-`iam.serviceAccounts.actAs` permission will cause the corresponding setup or
-deploy command to fail; the required roles above address those errors.
+The dry run must show `--no-allow-unauthenticated`. The deploy command may take
+about 10–20 minutes for the first build; it prints the service URL and a
+token-authenticated `/health` JSON response containing `"status":"ok"` (and
+other fields). The final curl has no token and should return `403`, confirming
+that the service is private. To call `/similarity`
+locally, optionally run:
+
+```bash
+gcloud --configuration=shellhacks --project=OWNER_PROJECT_ID run services proxy shellhacks-api --region=us-east1 --port=8081
+```
+
+Then POST to `http://localhost:8081/similarity` from another terminal.
+
+Private access is the default. Public access requires explicit owner approval
+and `CLOUDRUN_PUBLIC=1`; that setting makes the service reachable by anyone on
+the internet.
+
+## Troubleshooting
+
+- `PERMISSION_DENIED` naming `run.services.create` or `setIamPolicy` means the
+  deployer needs Cloud Run Admin. An `actAs` error means they need Service
+  Account User; `storage.objects.create` means Storage Admin; and a
+  `serviceusage` error means Service Usage Admin.
+- If a build cannot push to Artifact Registry, the owner identifies the Cloud
+  Build service account with the scoped `builds get-default-service-account`
+  command above, then grants it Cloud Build Builder
+  (`roles/cloudbuild.builds.builder`) and Artifact Registry Writer
+  (`roles/artifactregistry.writer`) as applicable.
+- If a revision does not start or the health check times out, inspect logs with:
+
+  ```bash
+  gcloud --configuration=shellhacks --project=OWNER_PROJECT_ID run services logs read shellhacks-api --region=us-east1
+  ```
+
+  The configured 2Gi memory is the baseline for model loading.
+- A `403` from the token-authenticated `/health` request means the deployer may
+  lack `run.invoker`, or the token account does not match the account in the
+  `shellhacks` configuration.
+
+With `min-instances=0`, idle cost is roughly $0; a build is roughly $0.15 and
+image storage costs cents per month. Actual charges vary with usage.
