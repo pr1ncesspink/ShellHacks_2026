@@ -10,6 +10,7 @@ __pycache__/
 # Generated outputs
 backend/pdfparsing/outputs/
 backend/documentparsing/outputs/
+/tmp/
 
 # Secrets and local env
 .env

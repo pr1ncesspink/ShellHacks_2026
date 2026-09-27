@@ -7,6 +7,11 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $repoRoot "backend\.env.snowflake"
 $python = Join-Path $repoRoot ".venv\Scripts\python.exe"
+# Prefer the dedicated upload environment once backend/requirements-projectdata.txt is installed there.
+$projectDataRoot = Join-Path $repoRoot ".venv-projectdata"
+if (Test-Path -LiteralPath (Join-Path $projectDataRoot "Lib\site-packages\snowflake\connector") -PathType Container) {
+    $python = Join-Path $projectDataRoot "Scripts\python.exe"
+}
 $allowedNames = @(
     "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_TOKEN", "SNOWFLAKE_WAREHOUSE",
     "SNOWFLAKE_ROLE", "SNOWFLAKE_DATABASE", "SNOWFLAKE_SCHEMA", "SNOWFLAKE_STAGE",
