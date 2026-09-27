@@ -34,7 +34,7 @@ export default async function LoginPage({
             <br className="desktop-break" /> so every crew can plan around the
             others.
           </p>
-          <ol className="story-bottom" aria-label="How GridLens works">
+          <ol className="story-bottom" aria-label="How CollideAverse works">
             <li>1. Connect</li>
             <li>2. Verify</li>
             <li>3. Coordinate</li>

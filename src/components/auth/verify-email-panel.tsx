@@ -192,7 +192,7 @@ export function VerifyEmailPanel({
         <span className="step-number">02</span>
         <div>
           <h3>Return here</h3>
-          <p>Then ask GridLens to check your verified status.</p>
+          <p>Then ask CollideAverse to check your verified status.</p>
         </div>
         <ShieldCheck size={16} aria-hidden="true" />
       </div>

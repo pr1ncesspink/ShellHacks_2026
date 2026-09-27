@@ -30,7 +30,7 @@ export function SiteHeader({
   active: SiteSection;
   user: SiteUser;
 }) {
-  const displayName = user.name?.trim() || user.email || "GridLens member";
+  const displayName = user.name?.trim() || user.email || "CollideAverse member";
   const detail = user.email || "Verified account";
   return (
     <header className="site-header">
