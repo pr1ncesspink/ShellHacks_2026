@@ -1,0 +1,44 @@
+<<<<<<< HEAD
+.venv/
+.venv-documents/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+.codegraph/
+backend/pdfparsing/outputs/
+backend/documentparsing/outputs/
+.env
+.env.local
+=======
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.venv/
+__pycache__/
+*.py[cod]
+.codegraph/
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+>>>>>>> f16bed293c29f6abb19d8020dcc17ba49b76a94e
+
+.npm-cache/

@@ -1,0 +1,43 @@
+/* Shared GridLens dark theme. */
+:root {
+  color-scheme: dark;
+  --background: #0e1218;
+  --surface: #171d26;
+  --surface-raised: #1c2531;
+  --surface-hover: #253446;
+  --border: #2d3b4d;
+  --text: #edf4fc;
+  --muted: #a6b7ca;
+  --accent: #98d4ff;
+  --accent-hover: #b8e2ff;
+  --accent-soft: #1c3043;
+  --accent-border: #426585;
+  --outline-accent: #38b6ff;
+  --warm-accent: #edcca3;
+  --on-accent: #102536;
+  --error: #ffb2a9;
+  --error-soft: #3d242b;
+}
+:root{font-family:Inter,'Segoe UI',sans-serif;color:var(--text);background:var(--background);font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;font-weight:400;font-size:14px}
+*{box-sizing:border-box}
+body{margin:0}
+button,input,select,textarea{font:inherit}
+button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}
+button{cursor:pointer}
+button:disabled{cursor:default;opacity:.55}
+button,input,select,textarea{border-radius:8px}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+a{color:inherit}
+h1,h2,h3,p{margin:0}
+h2{font-size:19px;letter-spacing:-.5px}
+h3{font-size:15px}
+small{display:block}
+input,textarea,select{border:1px solid var(--border);background:var(--surface);color:var(--text)}
+input,select{height:40px;padding:0 12px}
+textarea{padding:12px;resize:vertical;min-height:100px;line-height:1.6}
+button{border:0;padding:10px 15px;font-weight:600}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+
+
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+::selection { background: var(--accent); color: var(--on-accent); }
