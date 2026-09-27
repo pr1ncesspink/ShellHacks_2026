@@ -61,7 +61,7 @@ export default function SignupPage() {
         </section>
         <Card className="login-card panel">
           <div className="login-card-top">
-            <span className="icon-tile blue">
+            <span className="icon-tile violet">
               <UserPlus size={23} aria-hidden="true" />
             </span>
             <Badge variant="outline" className="muted-badge">
@@ -107,7 +107,6 @@ export default function SignupPage() {
             />
           </div>
           <div className="auth-step second-step">
-            <span className="step-number">02</span>
             <div>
               <h3>Next: verify your identity</h3>
               <p>Email verification and authenticator setup.</p>

@@ -112,6 +112,26 @@ svg {
 .brand-period {
   color: #00afb8;
 }
+.brand > img {
+  transition: filter 180ms ease;
+}
+.brand > span {
+  transition: text-shadow 180ms ease;
+}
+.brand:focus-visible > img {
+  filter: drop-shadow(0 0 6px #1d84f580);
+}
+.brand:focus-visible > span {
+  text-shadow: 0 0 10px #1d84f570;
+}
+@media (hover: hover) and (pointer: fine) {
+  .brand:hover > img {
+    filter: drop-shadow(0 0 6px #1d84f580);
+  }
+  .brand:hover > span {
+    text-shadow: 0 0 10px #1d84f570;
+  }
+}
 .site-header {
   border-bottom: 1px solid #ffffff0d;
   background: #101d30;
@@ -1781,7 +1801,42 @@ svg {
 .profile-link[aria-current] { box-shadow: 0 0 0 2px var(--grid-teal), 0 0 15px #00afb81c; }
 .account-switch a { text-decoration: underline; text-decoration-color: #e6559870; text-underline-offset: 5px; }
 
+/* Translucent accent fills preserve each card's text colors on hover. */
+.panel,
+.budget-intro,
+.data-banner {
+  --hover-accent: var(--grid-blue);
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
+}
+.metric-card:nth-child(2),
+.map-card,
+.budget-response,
+.profile-summary {
+  --hover-accent: var(--grid-teal);
+}
+.distribution-card,
+.upload-card,
+.login-card,
+.budget-intro,
+.profile-info:nth-child(2) {
+  --hover-accent: var(--grid-violet);
+}
+@media (hover: hover) and (pointer: fine) {
+  :is(.panel, .budget-intro, .data-banner):hover {
+    background-color: color-mix(in srgb, var(--hover-accent) 25%, transparent);
+    border-color: var(--hover-accent);
+    transform: scale(1.015);
+  }
+  .map-card:hover :is(.panel-heading, .map-placeholder),
+  .profile-summary:hover .profile-cover {
+    background-color: transparent;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  :is(.panel, .budget-intro, .data-banner):hover {
+    transform: none;
+  }
   *,
   *::before,
   *::after {
