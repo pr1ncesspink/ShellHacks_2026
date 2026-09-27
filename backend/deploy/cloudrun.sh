@@ -183,7 +183,7 @@ main() {
       tag="$(image_tag)"
       image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/${SERVICE_NAME}:${tag}"
       run_gcloud builds submit . --config=backend/cloudbuild.yaml --substitutions="_IMAGE=${image}"
-      local deploy_args=(run deploy "${SERVICE_NAME}" --image="${image}" --region="${GCP_REGION}" --memory=2Gi --cpu=1 --cpu-boost --min-instances=0 --max-instances=2 --timeout=300 --port=8080)
+      local deploy_args=(run deploy "${SERVICE_NAME}" --image="${image}" --region="${GCP_REGION}" --memory=2Gi --cpu=1 --cpu-boost --min-instances=0 --max-instances=3 --timeout=300 --port=8080)
       if [[ "${DEPLOY_PUBLIC}" == "0" ]]; then
         deploy_args+=(--no-allow-unauthenticated)
       else

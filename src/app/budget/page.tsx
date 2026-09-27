@@ -10,12 +10,14 @@ import {
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { requireUser } from "@/lib/server/session";
 
 export const metadata = { title: "Budget Summary" };
-export default function BudgetPage() {
+export default async function BudgetPage() {
+  const user = await requireUser("/budget");
   return (
     <>
-      <SiteHeader active="budget" />
+      <SiteHeader active="budget" user={user} />
       <main id="main-content" className="workspace">
         <PageHeading budget />
         <div className="budget-intro">

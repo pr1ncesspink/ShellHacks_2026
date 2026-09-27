@@ -192,6 +192,105 @@ svg {
     transform: none;
   }
 }
+
+/* Auth controls extend the existing login-card treatment without changing it. */
+.auth-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+}
+.auth-label-row label {
+  margin: 0;
+}
+.auth-inline-button,
+.auth-switch-account {
+  border: 0;
+  background: transparent;
+  color: #73b9ff;
+  font: inherit;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.auth-inline-button {
+  font-size: 10px;
+}
+.auth-inline-button:hover,
+.auth-switch-account:hover {
+  color: #fff;
+}
+.auth-field-help {
+  margin-top: 7px;
+  font-size: 10px;
+}
+.auth-feedback {
+  margin: 0 0 16px;
+  border: 1px solid #1d84f544;
+  border-radius: 8px;
+  background: #1d84f50d;
+  padding: 10px 12px;
+  color: #b9dafe;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.auth-feedback.error {
+  border-color: #e6559866;
+  background: #e655980d;
+  color: #ffb9d8;
+}
+.verification-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 22px;
+}
+.verification-actions button {
+  min-height: 42px;
+  font-size: 11px;
+}
+.auth-switch-account {
+  display: inline-flex;
+  height: auto;
+  min-height: 0;
+  margin-left: 4px;
+  vertical-align: baseline;
+}
+.profile-copy {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 520px) {
+  .verification-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Interactive auth targets remain easy to use with touch and keyboard input. */
+.auth-fields input,
+.preview-button,
+.verification-actions button {
+  min-height: 44px;
+}
+.preview-button {
+  height: 44px !important;
+}
+.auth-inline-button,
+.auth-switch-account {
+  min-height: 44px;
+  padding-block: 10px;
+}
+.exit-link {
+  min-width: 44px;
+  min-height: 44px;
+}
 .profile-area {
   display: flex;
   align-items: center;
