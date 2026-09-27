@@ -35,5 +35,8 @@
     "tailwindcss": "^4",
     "tw-animate-css": "latest",
     "typescript": "^5.9.3"
+  },
+  "allowScripts": {
+    "unrs-resolver@1.12.2": true
   }
 }
