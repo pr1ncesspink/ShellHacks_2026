@@ -1845,3 +1845,23 @@ svg {
     scroll-behavior: auto !important;
   }
 }
+
+/* Interactive landscape map */
+.project-map-card { isolation: isolate; }
+.project-map-card:hover { transform: none !important; }
+.project-map-canvas { height: 410px; min-height: 410px; width: 100%; background: #142237; z-index: 0; color-scheme: light; }
+.map-reset { border: 1px solid #00afb860; border-radius: 6px; padding: 7px 10px; color: #fff; background: #142237; font-size: 11px; }
+.project-map-note, .project-map-message { padding: 10px 20px; font-size: 11px; line-height: 1.5; }
+.project-map-popup { color: #101d30; }
+.project-map-popup p { color: #425269; margin: 6px 0; font-size: 12px; }
+.project-map-popup section + section { border-top: 1px solid #ccd4df; padding-top: 10px; margin-top: 10px; }
+.project-map-canvas .leaflet-control-attribution { color: #333; }
+.project-map-canvas .leaflet-control-attribution a { color: #075a99; }
+
+
+.upload-section.upload-section-first { margin-top: 0; margin-bottom: 28px; }
+
+
+.project-location-tooltip { max-width: 300px; white-space: normal; color: #101d30; }
+.project-map-tooltip-content strong { display: block; margin-bottom: 4px; }
+.project-map-tooltip-content { font-size: 12px; line-height: 1.5; }
