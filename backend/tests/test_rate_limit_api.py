@@ -162,6 +162,30 @@ def test_non_agent_routes_still_work_when_budgets_are_exhausted(monkeypatch, fak
     assert len(pipeline.calls) == 1
 
 
+def test_upload_diagnosis_route_is_counted(monkeypatch, fake_encoder):
+    from backend.app.api.deps import get_upload_diagnosis_service
+    from backend.app.api.routes.projects import get_project_store
+    from backend.tests.test_upload_diagnosis import PATH, StubClient, collision, service
+
+    class StubStore:
+        calls = 0
+
+        def collision(self, upload_id, overlap_id):
+            StubStore.calls += 1
+            return collision()
+
+    configure(monkeypatch, per_client=1)
+    client = StubClient()
+    subject = service(fake_encoder, client)
+    app = create_app()
+    app.dependency_overrides[get_project_store] = StubStore
+    app.dependency_overrides[get_upload_diagnosis_service] = lambda: subject
+    with TestClient(app) as http:
+        assert http.post(PATH, headers={UID_HEADER: "u1"}).status_code == 200
+        assert_denied(http.post(PATH, headers={UID_HEADER: "u1"}), "client")
+    assert StubStore.calls == client.calls == 1
+
+
 def test_disabled_middleware_and_separate_app_instances(monkeypatch):
     configure(monkeypatch, per_client=0, total=0)
     app, pipeline = app_with_pipeline()
