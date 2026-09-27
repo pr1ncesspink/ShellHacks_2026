@@ -1,12 +1,23 @@
 import Link from "next/link";
 import Image from "next/image";
 import { LayoutDashboard, ChartNoAxesCombined, LogOut } from "lucide-react";
-import { Brand } from "./brand";
+import { SignOutButton } from "@/components/auth/sign-out-button";
+import { Brand } from "@/components/brand";
+
+export type SiteUser = {
+  email: string | null;
+  name: string | null;
+};
+
 export function SiteHeader({
   active,
+  user,
 }: {
   active: "dashboard" | "budget" | "profile";
+  user: SiteUser;
 }) {
+  const displayName = user.name?.trim() || user.email || "GridLens member";
+  const detail = user.email || "Verified account";
   return (
     <header className="site-header">
       <div className="header-inner">
@@ -29,7 +40,8 @@ export function SiteHeader({
         </nav>
         <div className="profile-area">
           <span className="profile-copy">
-            Your workspace<small>Project planner</small>
+            {displayName}
+            <small>{detail}</small>
           </span>
           <Link
             href="/profile"
@@ -40,20 +52,21 @@ export function SiteHeader({
           >
             <Image
               src="/profile.svg"
-              alt="Placeholder user profile"
+              alt=""
               width={38}
               height={38}
               className="avatar"
             />
           </Link>
-          <Link
-            href="/"
+          <SignOutButton
+            variant="ghost"
+            size="icon"
             className="exit-link"
-            aria-label="View login preview"
-            title="View login preview"
+            aria-label="Sign out"
+            title="Sign out"
           >
             <LogOut size={17} aria-hidden="true" />
-          </Link>
+          </SignOutButton>
         </div>
       </div>
     </header>

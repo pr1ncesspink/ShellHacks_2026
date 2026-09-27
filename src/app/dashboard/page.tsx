@@ -4,20 +4,22 @@ import {
 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
 import {
-  MapPlaceholder,
   PageHeading,
   WorkspaceFooter,
 } from "@/components/workspace";
 import { FileUpload } from "@/components/file-upload";
+import { ProjectMap } from "@/components/project-map";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getDashboardData } from "@/lib/backend";
 import { summarize } from "@/lib/overlaps";
+import { requireUser } from "@/lib/server/session";
 
 export const metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
-  const data = await getDashboardData();
+  const user = await requireUser("/dashboard");
+  const data = await getDashboardData(user);
   const stats = summarize(data.rows);
   const failed = data.mode === "error";
   const metrics = [
@@ -34,14 +36,17 @@ export default async function DashboardPage() {
   ];
   return (
     <>
-      <SiteHeader active="dashboard" />
+      <SiteHeader active="dashboard" user={user} />
       <main id="main-content" className="workspace">
         <PageHeading />
+        <section className="upload-section upload-section-first" aria-label="Construction plans">
+          <FileUpload />
+        </section>
         <div className={`data-banner ${failed ? "error-banner" : ""}`}>
           <span>
             <Info size={15} aria-hidden="true" />
             {data.mode === "example"
-              ? "You’re viewing example project data. Connect your backend to see live results."
+              ? "Overlap statistics use example data. The map shows a static reference dataset."
               : failed
                 ? "We couldn’t load project data. Check your backend connection and try again."
                 : "Live project data from your connected backend."}
@@ -131,11 +136,8 @@ export default async function DashboardPage() {
               </p>
             </Card>
           </section>
-          <MapPlaceholder />
+          <ProjectMap />
         </div>
-        <section className="upload-section" aria-label="Construction plans">
-          <FileUpload />
-        </section>
         <WorkspaceFooter />
       </main>
     </>
