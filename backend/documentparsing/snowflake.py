@@ -115,6 +115,27 @@ class SnowflakeClient:
             raise SnowflakeError("Expected exactly one JSON value from Snowflake")
         return json_object(data[0][0], "Cortex")
 
+    def query_rows(self, statement: str, values=(), *, context=True) -> list:
+        """Read every SQL API result partition, including large project payloads."""
+        result = self.execute(statement, values, context=context)
+        rows = result.get("data", [])
+        if not isinstance(rows, list):
+            raise SnowflakeError("SQL API returned invalid rows")
+        rows = list(rows)
+        metadata = result.get("resultSetMetaData", {})
+        partitions = metadata.get("partitionInfo", [])
+        handle = result.get("statementHandle", "")
+        if len(partitions) > 1 and not re.fullmatch(r"[A-Za-z0-9-]+", handle):
+            raise SnowflakeError("Snowflake returned an invalid result handle")
+        for partition in range(1, len(partitions)):
+            status, page = self._request("GET", f"/api/v2/statements/{handle}", params={"partition": partition})
+            if status != 200 or not isinstance(page.get("data"), list):
+                raise SnowflakeError("Snowflake result partition was not available")
+            rows.extend(page["data"])
+        if "numRows" in metadata and len(rows) != int(metadata["numRows"]):
+            raise SnowflakeError("Snowflake returned an incomplete result set")
+        return rows
+
     def setup(self):
         """Create only this pipeline's namespace and stage; no destructive replacement."""
         s = self.settings

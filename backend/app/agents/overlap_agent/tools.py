@@ -119,3 +119,25 @@ def list_overlaps(min_similarity: float = -1.0) -> dict[str, object]:
         return {"status": "error", "error_message": str(exc)}
     overlaps.sort(key=lambda row: float(row["name_similarity"]), reverse=True)
     return {"status": "success", "overlaps": overlaps}
+
+
+def get_upload_collisions(upload_id: str, offset: int = 0, limit: int = 100) -> dict[str, object]:
+    """Read and score one page of an uploaded plan's 25-mile collision candidates.
+
+    Args:
+        upload_id: The UPL_ identifier returned by the project upload endpoint.
+        offset: Number of collision records to skip.
+        limit: Maximum records to return, between 1 and 500. Follow next_offset for more.
+    """
+    from backend.documentparsing.config import SnowflakeSettings
+    from backend.documentparsing.snowflake import SnowflakeClient, SnowflakeError
+    from backend.projectdata.pipeline import score_collision_page
+    from backend.projectdata.storage import ProjectStore, validate_upload_id
+
+    try:
+        validate_upload_id(upload_id)
+        with SnowflakeClient(SnowflakeSettings.from_env()) as client:
+            page = ProjectStore(client).collisions(upload_id, offset=offset, limit=limit)
+        return {"status": "success", **score_collision_page(page, _encoder_provider())}
+    except (ValueError, LookupError, OSError, SnowflakeError):
+        return {"status": "error", "error_message": "Collision retrieval failed; verify upload_id, pagination, and Snowflake configuration"}

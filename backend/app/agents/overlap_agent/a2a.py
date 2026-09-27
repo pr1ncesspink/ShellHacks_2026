@@ -33,6 +33,7 @@ def _agent_card(settings: Settings):
             ("score_project_names", "Score two utility project names."),
             ("get_overlap", "Retrieve one scored overlap by identifier."),
             ("list_overlaps", "List scored overlaps above a similarity threshold."),
+            ("get_upload_collisions", "Read an uploaded plan's nearby reference projects and scope similarity."),
         ]
     ]
     return _compat.build_agent_card(
