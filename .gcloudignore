@@ -10,6 +10,13 @@
 !backend/app/**
 !backend/data/
 !backend/data/**
+# Upload/Snowflake runtime copied by the Dockerfile.
+!backend/requirements-documentparsing.txt
+!backend/requirements-projectdata.txt
+!backend/documentparsing/
+!backend/documentparsing/**
+!backend/projectdata/
+!backend/projectdata/**
 
 .venv/
 .git/
@@ -21,6 +28,9 @@
 tmp/
 backend/output/
 backend/tests/
+backend/documentparsing/tests/
+backend/documentparsing/outputs/
+backend/documentparsing/**/.env.example
 backend/deploy/cloudrun.env
 backend/app/**/.env
 **/.env

@@ -165,7 +165,7 @@ def test_dry_run_prints_scoped_deploy_commands_without_executing_gcloud(tmp_path
     assert all("--configuration=shellhacks" in line and "--project=demo-project" in line for line in gcloud_lines)
     output = result.stdout + result.stderr
     assert "--config=backend/cloudbuild.yaml" in output
-    assert "--max-instances=2" in output
+    assert "--max-instances=3" in output
     assert "--memory=2Gi" in output
     assert not Path(env["FAKE_GCLOUD_LOG"]).exists()
 

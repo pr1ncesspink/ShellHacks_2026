@@ -2,7 +2,9 @@
 
 Next.js App Router + TypeScript + shadcn/ui frontend with a separate FastAPI backend hosted on Google Cloud Run.
 
-The frontend and backend are intentionally disconnected for now. The website is a design preview using labeled example data; you do not need Python, Cloud Run credentials, or a running backend to view it.
+The frontend supports verified Firebase accounts and can either show labeled
+example data or connect server-side to the private Cloud Run backend. Example
+mode does not require Python, Cloud Run credentials, or a running backend.
 
 ## Frontend
 
@@ -14,23 +16,32 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. Routes:
+Fill the Firebase values in `.env.local` from the Web app in your Firebase
+project (it may be separate from the Cloud Run project), then enable
+Email/Password in Firebase Authentication. Open
+http://127.0.0.1:5173. Anyone can create an account at `/signup`; Firebase sends
+an email verification link, and `/dashboard`, `/budget`, and `/profile` stay
+server-protected until the address is verified. The profile displays the real
+Firebase name and email while organization, role, maps, and budget analysis stay
+labeled as previews.
 
-- `/` — two-step authentication design preview. No real login, verification, or access control.
-- `/dashboard` — overlap statistics, a map placeholder, and local file selection.
-- `/budget` — budget input/response placeholders and a map placeholder.
-- `/signup` — account creation preview linked from the login page; no accounts are created.
-- `/profile` — example account, organization, and verification details, linked from the header avatar on the dashboard and budget pages.
-
-Keep `BACKEND_URL` empty in `.env.local` and in the frontend hosting environment:
+Keep `BACKEND_URL` empty to use the explicitly labeled example dashboard:
 
 ```dotenv
 BACKEND_URL=
+BACKEND_AUTH=none
 ```
 
-With this setting empty, the dashboard uses example data and makes no requests to the backend. The displayed project counts and similarity scores are illustrative, not live project results.
+With this setting empty, the dashboard makes no backend request. The displayed
+project counts and similarity scores are illustrative. To use local uvicorn,
+start the backend as described below and set:
 
-File selection accepts up to five PDF/PNG/JPG files, 20 MB each. Files stay in browser memory, are cleared when leaving the page, and are not uploaded or processed. Authentication, maps, and budget analysis intentionally remain placeholders.
+```dotenv
+BACKEND_URL=http://127.0.0.1:8000
+BACKEND_AUTH=none
+```
+
+File selection accepts up to five PDF/PNG/JPG files, 20 MB each. Files stay in browser memory, are cleared when leaving the page, and are not uploaded or processed. Maps and budget analysis intentionally remain placeholders.
 
 For production:
 
@@ -39,7 +50,12 @@ npm run build
 npm start
 ```
 
-The production server listens on http://127.0.0.1:4173, matching the existing temporary tunnel. Deploy the frontend to a host that supports a Next.js server; it is not a static export. `npm run preview` is an alias for `npm start`.
+The production server listens on http://127.0.0.1:4173. Deploy the frontend to
+a host that supports a Next.js server; it is not a static export. `npm run
+preview` is an alias for `npm start`. Private Cloud Run access uses Vercel OIDC,
+Google Workload Identity Federation, and service-account impersonation without
+a stored Google key. See [Firebase and Vercel setup](docs/FIREBASE_VERCEL_SETUP.md)
+for the complete human-run configuration.
 
 ## Run the backend locally (optional)
 
@@ -93,11 +109,18 @@ The previous `python -m backend.pdfparsing` command and Python `run(args)` entry
 
 The frontend file picker is not connected to this pipeline. Selecting a file does not send it to Snowflake or Cloud Run.
 
-## Future backend integration
+## Private backend integration
 
-A server-side adapter exists for `GET /overlaps/similarity`, but connecting it is deferred. When integration is requested, configure `BACKEND_URL` and the frontend server's access to the API. Current `main` deploys Cloud Run privately by default, so a URL alone is insufficient: authenticated requests and an authorized server identity will be needed. Cloud Run IAM authentication is not implemented in the frontend adapter yet.
+The dashboard server calls `GET /overlaps/similarity`. With
+`BACKEND_AUTH=google-oidc`, it mints a Google ID token for the Cloud Run origin
+through Vercel OIDC and Workload Identity Federation, then forwards the verified
+Firebase uid in `X-Authenticated-User`. The browser receives neither the Cloud
+Run URL nor a Google credential. Cloud Run remains private.
 
-Keep the backend private; connecting the frontend should not require making it public. An unavailable or invalid configured backend shows an error instead of silently substituting examples. Backend deployment and frontend hosting remain separate.
+An unavailable backend or invalid configuration shows dashboard error mode
+instead of substituting example rows. Use `BACKEND_AUTH=none` only for local
+uvicorn. Production and preview setup, IAM bindings, environment variables, and
+smoke tests are in [the setup runbook](docs/FIREBASE_VERCEL_SETUP.md).
 
 ## Validation and deployment
 

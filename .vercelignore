@@ -1,0 +1,8 @@
+backend/
+.harness/
+.codex/
+.agents/
+.claude/
+.codegraph/
+tmp/
+gridlock_real_projects_geospatial.csv

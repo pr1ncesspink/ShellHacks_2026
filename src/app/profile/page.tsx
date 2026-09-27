@@ -11,12 +11,16 @@ import { WorkspaceFooter } from "@/components/workspace";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { requireUser } from "@/lib/server/session";
 
 export const metadata = { title: "Account & Profile" };
-export default function ProfilePage() {
+export default async function ProfilePage() {
+  const user = await requireUser("/profile");
+  const displayName = user.name?.trim() || "GridLens member";
+  const email = user.email || "Email unavailable";
   return (
     <>
-      <SiteHeader active="profile" />
+      <SiteHeader active="profile" user={user} />
       <main id="main-content" className="workspace">
         <div className="page-heading">
           <div>
@@ -39,20 +43,21 @@ export default function ProfilePage() {
             <div className="profile-summary-content">
               <Image
                 src="/profile.svg"
-                alt="Placeholder user profile"
+                alt=""
                 width={88}
                 height={88}
                 className="profile-portrait"
               />
               <span className="eyebrow">YOUR GRIDLENS ACCOUNT</span>
-              <h2>Your name</h2>
-              <p>Project planner</p>
+              <h2>{displayName}</h2>
+              <p>{email}</p>
               <Badge variant="outline" className="muted-badge">
-                EXAMPLE PROFILE
+                VERIFIED ACCOUNT
               </Badge>
               <div className="profile-team">
                 <span>
-                  Your organization<small>Team details will appear here</small>
+                  Organization preview
+                  <small>Team details are not connected yet</small>
                 </span>
               </div>
               <Button asChild className="profile-dashboard-button">
@@ -77,24 +82,24 @@ export default function ProfilePage() {
               <dl className="profile-fields">
                 <div>
                   <dt>Full name</dt>
-                  <dd>Your name</dd>
+                  <dd>{displayName}</dd>
                 </div>
                 <div>
                   <dt>Work email</dt>
-                  <dd>you@company.com</dd>
+                  <dd>{email}</dd>
                 </div>
                 <div>
                   <dt>Organization</dt>
-                  <dd>Your organization</dd>
+                  <dd>Preview — not connected</dd>
                 </div>
                 <div>
                   <dt>Role</dt>
-                  <dd>Project planner</dd>
+                  <dd>Preview — project planner</dd>
                 </div>
               </dl>
               <p className="profile-note">
-                These are example details. Profile editing and saving will be
-                available when accounts are connected.
+                Name and email come from your verified Firebase account. The
+                organization and role remain previews.
               </p>
             </Card>
             <Card className="profile-info panel">
@@ -111,31 +116,31 @@ export default function ProfilePage() {
                 <UserRound size={20} aria-hidden="true" />
                 <div>
                   <h3>Email & password</h3>
-                  <p>Account sign-in is not connected yet.</p>
+                  <p>{email} is verified for workspace access.</p>
                 </div>
                 <Badge variant="outline" className="muted-badge">
-                  NOT CONNECTED
+                  VERIFIED
                 </Badge>
               </div>
               <div className="security-row">
                 <Fingerprint size={21} aria-hidden="true" />
                 <div>
-                  <h3>Two-step verification</h3>
-                  <p>Authenticator setup is a visual placeholder.</p>
+                  <h3>Additional sign-in factors</h3>
+                  <p>Multi-factor authentication is a future preview.</p>
                 </div>
                 <Badge variant="outline" className="muted-badge">
-                  NOT SET UP
+                  PREVIEW
                 </Badge>
               </div>
-              <Link href="/" className="subtle-link">
-                View sign-in preview <ArrowRight size={14} aria-hidden="true" />
+              <Link href="/dashboard" className="subtle-link">
+                Return to dashboard <ArrowRight size={14} aria-hidden="true" />
               </Link>
             </Card>
           </section>
         </div>
         <p className="budget-disclaimer">
-          Profile preview only. No account, saved personal details, or
-          authentication is active.
+          Organization, role, profile editing, and multi-factor settings remain
+          previews. Your Firebase name and verified email are live.
         </p>
         <WorkspaceFooter />
       </main>

@@ -1,19 +1,14 @@
 import Link from "next/link";
-import {
-  ArrowRight,
-  UserPlus,
-  ShieldCheck,
-  Layers3,
-  LockKeyhole,
-} from "lucide-react";
+import { redirect } from "next/navigation";
+import { ArrowRight, Layers3, ShieldCheck } from "lucide-react";
+import { SignUpForm } from "@/components/auth/sign-up-form";
 import { Brand } from "@/components/brand";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { getUser } from "@/lib/server/session";
 
 export const metadata = { title: "Create Account" };
-export default function SignupPage() {
+
+export default async function SignupPage() {
+  if (await getUser()) redirect("/dashboard");
   return (
     <div className="login-page">
       <header className="login-header">
@@ -34,31 +29,32 @@ export default function SignupPage() {
             <span>A view of what’s next.</span>
           </h1>
           <p>
-            Bring your team’s perspective to every project.
+            Create an account with your email.
             <br />
-            Start with a workspace that brings it all together.
+            Verify it before entering your private workspace.
           </p>
           <div className="signup-benefits">
             <div>
               <Layers3 size={20} aria-hidden="true" />
               <span>
                 One connected workspace
-                <small>
-                  Project context, overlap insights, and room to plan.
-                </small>
+                <small>Project context, overlap insights, and room to plan.</small>
               </span>
             </div>
             <div>
               <ShieldCheck size={20} aria-hidden="true" />
               <span>
-                A thoughtful first step
+                Verified access
                 <small>
-                  Account creation and verification are coming next.
+                  Your workspace opens after Firebase verifies your email.
                 </small>
               </span>
             </div>
           </div>
         </section>
+<<<<<<< HEAD
+        <SignUpForm />
+=======
         <Card className="login-card panel">
           <div className="login-card-top">
             <span className="icon-tile violet">
@@ -132,6 +128,7 @@ export default function SignupPage() {
             Already have an account? <Link href="/">Sign in</Link>
           </p>
         </Card>
+>>>>>>> 96cc8833180f88b8b0c2e590dad55eb8e28f0d10
       </main>
       <footer className="login-footer">
         <span>GridLens / Built for better coordination.</span>
