@@ -101,7 +101,7 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
         <div className="auth-step">
           <span className="step-number">01</span>
           <div>
-            <h3>Sign in to GridLens</h3>
+            <h3>Sign in to CollideAverse</h3>
             <p>Your email and password.</p>
           </div>
           <LockKeyhole size={16} aria-hidden="true" />
@@ -170,7 +170,7 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
         </Button>
       </form>
       <p className="account-switch">
-        New to GridLens?{" "}
+        New to CollideAverse?{" "}
         <Link href="/signup">
           Create an account <ArrowRight size={16} aria-hidden="true" />
         </Link>

@@ -4,7 +4,7 @@ import { isLocalPreview } from "@/lib/server/local-preview";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "GridLens — Project Clarity", template: "%s | GridLens" },
+  title: { default: "CollideAverse — Project Clarity", template: "%s | CollideAverse" },
   description:
     "A clearer view of construction project overlap and coordination.",
   icons: { icon: "/gridlens-mark.svg" },

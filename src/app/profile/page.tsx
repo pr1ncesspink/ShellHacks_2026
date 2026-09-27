@@ -7,7 +7,7 @@ import { requireUser } from "@/lib/server/session";
 export const metadata = { title: "Account and profile" };
 export default async function ProfilePage() {
   const user = await requireUser("/profile");
-  const displayName = user.name?.trim() || "GridLens member";
+  const displayName = user.name?.trim() || "CollideAverse member";
   const email = user.email || "Email unavailable";
   return (
     <>
@@ -36,7 +36,7 @@ export default async function ProfilePage() {
                 >
                   <UserRound size={20} aria-hidden="true" />
                 </span>
-                <span className="eyebrow">Your GridLens account</span>
+                <span className="eyebrow">Your CollideAverse account</span>
                 <h2>{displayName}</h2>
                 <p>{email}</p>
                 <Badge variant="success">Verified account</Badge>
