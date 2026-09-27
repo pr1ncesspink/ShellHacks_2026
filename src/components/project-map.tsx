@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import defaultLocations from "@/data/project-locations.json";
-import { proximityPairs, type MapProject } from "@/lib/project-data";
+import { type MapProject } from "@/lib/project-data";
 import { Card } from "@/components/ui/card";
 
 const key = process.env.NEXT_PUBLIC_MAPTILER_KEY;
@@ -12,14 +12,14 @@ const style = key
   ? `https://api.maptiler.com/maps/streets-v2/style.json?key=${encodeURIComponent(key)}`
   : "https://tiles.openfreemap.org/styles/liberty";
 
-export function ProjectMap({ locations = defaultLocations, sourceLabel = "CSV project locations" }: { locations?: MapProject[]; sourceLabel?: string }) {
+export function ProjectMap({ locations = defaultLocations, sourceLabel = "CSV project locations", matchedIds, analysisReady }: { locations?: MapProject[]; sourceLabel?: string; matchedIds: string[]; analysisReady: boolean }) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [selected, setSelected] = useState("");
   const [status, setStatus] = useState("Loading map…");
   const [attempt, setAttempt] = useState(0);
 
-  const nearbyIds = useMemo(() => new Set(proximityPairs(locations, 25).flatMap(({ a, b }) => [a.record_id, b.record_id])), [locations]);
+  const nearbyIds = useMemo(() => new Set(matchedIds), [matchedIds]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -60,7 +60,7 @@ export function ProjectMap({ locations = defaultLocations, sourceLabel = "CSV pr
       const pin = document.createElement("button");
       pin.type = "button";
       pin.className = nearbyIds.has(project.record_id) ? "project-map-pin is-nearby" : "project-map-pin";
-      pin.setAttribute("aria-label", `View ${project.project_name}${nearbyIds.has(project.record_id) ? ", within 25 miles of another project" : ""}`);
+      pin.setAttribute("aria-label", `View ${project.project_name}${nearbyIds.has(project.record_id) ? ", matches distance and timing criteria" : ""}`);
 
 
       const content = document.createElement("div");
@@ -109,7 +109,7 @@ export function ProjectMap({ locations = defaultLocations, sourceLabel = "CSV pr
   return (
     <Card className="map-card panel">
       <div className="panel-heading">
-        <div><span className="eyebrow">SPATIAL CONTEXT</span><h2>Project landscape</h2></div>
+        <h2>Map Overview</h2>
         <span className="project-map-count">{locations.length} locations</span>
       </div>
       <div className="project-map-toolbar">
@@ -122,8 +122,8 @@ export function ProjectMap({ locations = defaultLocations, sourceLabel = "CSV pr
           <option value="">Select a project location…</option>
           {locations.map((item) => <option key={item.record_id} value={item.record_id}>{item.project_name}{item.segment ? ` — ${item.segment}` : ""} ({item.record_id})</option>)}
         </select>
-        <div className="project-map-legend" aria-label="Map marker colors"><span><i className="nearby-swatch" />Within 25 miles of another project</span><span><i />No project within 25 miles</span></div>
-        <p className="project-map-line-note">Hover over a dot to see coordinates and the published date or year.</p>
+        <div className="project-map-legend" aria-label="Map marker colors"><span><i className="nearby-swatch" />Distance + timing match</span><span><i />No confirmed match</span></div>
+        <p className="project-map-line-note">{analysisReady ? "Backend matches use distance and published timing; they do not confirm physical overlap." : "Backend analysis pending or unavailable. No matches are highlighted."}</p>
         <button className="project-map-reset" type="button" onClick={() => {
           const bounds = new maplibregl.LngLatBounds();
           locations.forEach(p => bounds.extend([p.longitude, p.latitude]));
