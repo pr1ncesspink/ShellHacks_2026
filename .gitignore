@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 .venv/
 .venv-documents/
 __pycache__/
@@ -10,7 +9,6 @@ backend/pdfparsing/outputs/
 backend/documentparsing/outputs/
 .env
 .env.local
-=======
 # Logs
 logs
 *.log
@@ -39,4 +37,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
->>>>>>> f16bed293c29f6abb19d8020dcc17ba49b76a94e
