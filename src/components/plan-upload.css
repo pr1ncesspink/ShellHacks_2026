@@ -1,0 +1,337 @@
+/*
+ * Dashboard uploader (file-upload.tsx) and upload stepper (upload-stepper.tsx).
+ * Theme tokens only (see :root in src/app/globals.css); no raw colours.
+ * Roles: teal = done, violet = current, pink = failed, muted = pending.
+ */
+
+.plan-upload {
+  gap: 1.25rem;
+  padding: 1.5rem;
+}
+
+.plan-upload-header h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.plan-upload-header p {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+}
+
+/* ---- dropzone: one <label> target ---------------------------------------- */
+
+.plan-upload-dropzone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 9rem;
+  padding: 1.5rem 1rem;
+  border: 1px dashed var(--input);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--background);
+  color: var(--foreground);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.plan-upload-dropzone:hover {
+  border-color: var(--primary);
+}
+
+.plan-upload-dropzone:has(input:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-color: var(--ring);
+}
+
+/* Drag-over also swaps the text to "Drop to upload" and the border style. */
+.plan-upload-dropzone[data-state="drag-over"] {
+  border-style: solid;
+  border-color: var(--primary);
+  background: var(--muted);
+}
+
+.plan-upload-dropzone-icon {
+  color: var(--primary-text);
+}
+
+.plan-upload-dropzone-text {
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.plan-upload-choose {
+  color: var(--primary-text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.plan-upload-constraints {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+/* ---- rejected files -------------------------------------------------------- */
+
+.plan-upload-rejections {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--destructive);
+  border-radius: var(--radius-md, 8px);
+  font-size: 0.875rem;
+  color: var(--foreground);
+}
+
+.plan-upload-rejections p {
+  margin: 0;
+  font-weight: 600;
+  color: var(--destructive-text);
+}
+
+.plan-upload-rejections ul {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-upload-rejections li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.plan-upload-rejections li > svg {
+  flex: none;
+  margin-top: 0.125rem;
+  color: var(--destructive-text);
+}
+
+/* ---- file rows ------------------------------------------------------------- */
+
+.plan-upload-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-upload-item {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--background);
+}
+
+.plan-upload-item[data-state="failed"] {
+  border-color: var(--destructive);
+}
+
+.plan-upload-item-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.plan-upload-item-head > svg {
+  flex: none;
+  margin-top: 0.125rem;
+  color: var(--muted-foreground);
+}
+
+.plan-upload-item-meta {
+  display: grid;
+  flex: 1;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.plan-upload-item-name {
+  font-weight: 500;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+
+.plan-upload-item-info {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-upload-item-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--info-text);
+}
+
+.plan-upload-item[data-state="succeeded"] .plan-upload-item-status {
+  color: var(--success-text);
+}
+
+.plan-upload-item[data-state="failed"] .plan-upload-item-status {
+  color: var(--destructive-text);
+}
+
+.plan-upload-item-actions {
+  display: flex;
+  flex: none;
+  gap: 0.25rem;
+  margin: -0.5rem -0.5rem 0 0;
+}
+
+.plan-upload-item-error {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
+.plan-upload-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+.plan-upload-note > svg {
+  flex: none;
+  margin-top: 0.0625rem;
+}
+
+/* ---- stepper --------------------------------------------------------------- */
+
+.upload-stepper {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.upload-stepper-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 0.875rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8125rem;
+}
+
+.upload-stepper-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.5rem;
+  color: var(--muted-foreground);
+}
+
+.upload-stepper-step > svg {
+  flex: none;
+}
+
+.upload-stepper-step[data-state="done"] {
+  color: var(--foreground);
+}
+
+.upload-stepper-step[data-state="done"] > svg {
+  color: var(--success-text);
+}
+
+.upload-stepper-step[data-state="current"] {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.upload-stepper-step[data-state="current"] > svg {
+  color: var(--info-text);
+}
+
+.upload-stepper-step[data-state="failed"] {
+  font-weight: 600;
+  color: var(--destructive-text);
+}
+
+.upload-stepper-detail,
+.upload-stepper-total {
+  font-weight: 400;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-stepper-total {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.upload-stepper-spin {
+  animation: upload-stepper-spin 1s linear infinite;
+}
+
+@keyframes upload-stepper-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.upload-stepper-failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--destructive);
+  border-radius: var(--radius-md, 8px);
+  background: var(--card);
+  font-size: 0.875rem;
+}
+
+.upload-stepper-failure > svg {
+  flex: none;
+  color: var(--destructive-text);
+}
+
+.upload-stepper-failure p {
+  flex: 1 1 14rem;
+  margin: 0;
+  color: var(--foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upload-stepper-spin {
+    animation: none;
+  }
+
+  .plan-upload-dropzone {
+    transition: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .plan-upload {
+    padding: 1rem;
+  }
+
+  .plan-upload-dropzone {
+    min-height: 8rem;
+  }
+
+  .plan-upload-item {
+    padding: 0.75rem;
+  }
+}

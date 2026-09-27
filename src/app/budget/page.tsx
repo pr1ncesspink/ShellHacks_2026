@@ -1,19 +1,13 @@
-import {
-  LockKeyhole,
-} from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
-import {
-  MapPlaceholder,
-  PageHeading,
-  WorkspaceFooter,
-} from "@/components/workspace";
-import { requireUser } from "@/lib/server/session";
-import { BudgetConversation } from "@/components/budget-conversation";
+import { PageHeading } from "@/components/workspace";
+import { BudgetScheduleWorkspace } from "@/components/budget-schedule-workspace";
 import { ProjectMap } from "@/components/project-map";
+import { requireUser } from "@/lib/server/session";
 import points from "@/data/project-locations.json";
 import "@/components/budget-planner.css";
 
-export const metadata = { title: "Budget Summary" };
+export const metadata = { title: "Budget" };
+
 export default async function BudgetPage({ searchParams }: { searchParams: Promise<{ project?: string | string[] }> }) {
   const params = await searchParams;
   const project = typeof params.project === "string" ? points.find(p => p.record_id === params.project) : undefined;
@@ -22,23 +16,21 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
     <>
       <SiteHeader active="budget" user={user} />
       <main id="main-content" className="workspace">
-        <PageHeading budget />
+        <PageHeading
+          section="Budget"
+          title="Plan with the full picture."
+          description={project
+            ? `Schedule options with ${project.project_name} highlighted on the map.`
+            : "Explore schedule changes across reference projects. Select a point on the map to focus on one project."}
+        />
         <div className="budget-grid">
-          <section
-            className="budget-column"
-            aria-label="Budget planning and responses"
-          >
-            <BudgetConversation key={project?.record_id ?? "all"} projectId={project?.record_id} />
+          <section className="budget-column" aria-label="Schedule planning">
+            <BudgetScheduleWorkspace />
           </section>
           <div className="budget-map-frame">
-            {project ? <ProjectMap focusedRecordId={project.record_id} navigateToBudget={false} /> : <MapPlaceholder budget />}
+            <ProjectMap focusedRecordId={project?.record_id} navigateToBudget={!project} />
           </div>
         </div>
-        <p className="budget-disclaimer">
-          <LockKeyhole size={14} aria-hidden="true" />
-          AI responses are planning suggestions. Verify project constraints and cost inputs before making decisions.
-        </p>
-        <WorkspaceFooter />
       </main>
     </>
   );

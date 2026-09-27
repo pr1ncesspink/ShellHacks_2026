@@ -30,6 +30,7 @@ const created = {
   expires_at: "2026-09-27T12:15:00Z",
 };
 const state = { session_id: ID, status: "succeeded", upload_id: "UPL_abc123", error_code: null, updated_at: "2026-09-27T12:20:00Z" };
+const noStage = { stage: null, stage_detail: null, stage_started_at: null, kind: null };
 
 test("session id regex", () => {
   assert.ok(SESSION_ID.test(ID));
@@ -72,7 +73,7 @@ test("parseCreatedSession rejects malformed responses", () => {
 test("parseProcessResult and parseSessionState", () => {
   assert.deepEqual(parseProcessResult({ status: "queued" }), { status: "queued" });
   assert.throws(() => parseProcessResult({ status: "done" }));
-  assert.deepEqual(parseSessionState({ ...state, secret: 1 }), state);
+  assert.deepEqual(parseSessionState({ ...state, secret: 1 }), { ...state, ...noStage });
   assert.deepEqual(
     parseSessionState({ ...state, status: "failed", upload_id: null, error_code: "snowflake_failed" }).error_code,
     "snowflake_failed",
@@ -224,4 +225,254 @@ test("callUploadApi maps failures to safe messages", async () => {
   await assert.rejects(callUploadApi("/api/x", undefined, down), (e) => e instanceof UploadApiError && e.status === null && e.message === GENERIC_API_ERROR);
   const garbage = (async () => new Response("<html>secret</html>", { status: 200 })) as typeof fetch;
   await assert.rejects(callUploadApi("/api/x", undefined, garbage), { message: GENERIC_API_ERROR });
+});
+
+// ---- Stage fields, CSV kind, onProgress/onQueued (HARNESS-FRONTEND-REVAMP-001) ----
+import {
+  MAX_CSV_BYTES,
+  UploadCancelledError,
+  isSessionNotFoundError,
+  isUploadCancelled,
+  kindFromContentType,
+  pollUploadSession,
+  sessionProgress,
+  splitCsvLine,
+  uploadKindOf,
+  validateCsv,
+} from "./upload-sessions.ts";
+import type { UploadProgress } from "./upload-progress.ts";
+
+const processing = { ...state, status: "processing", upload_id: null };
+
+test("parseSessionState accepts valid stage fields", () => {
+  const parsed = parseSessionState({
+    ...processing, stage: "extracting", stage_detail: { done: 3, total: 9, extra: 1 },
+    stage_started_at: "2026-09-27T12:19:00Z", kind: "csv",
+  });
+  assert.equal(parsed.stage, "extracting");
+  assert.deepEqual(parsed.stage_detail, { done: 3, total: 9 });
+  assert.equal(parsed.stage_started_at, "2026-09-27T12:19:00Z");
+  assert.equal(parsed.kind, "csv");
+  assert.equal(parseSessionState({ ...processing, stage: "summarizing" }).stage, "summarizing");
+});
+
+test("parseSessionState nulls unknown stage and malformed progress fields", () => {
+  for (const bad of [
+    { stage: "exploding" }, { stage: 3 }, { stage_detail: { done: 5, total: 4 } },
+    { stage_detail: { done: -1, total: 4 } }, { stage_detail: { done: 1.5, total: 4 } },
+    { stage_detail: { done: 1, total: 100_001 } }, { stage_detail: [1, 2] }, { stage_detail: "1/2" },
+    { stage_started_at: "yesterday" }, { stage_started_at: 5 }, { kind: "png" },
+  ]) {
+    const parsed = parseSessionState({ ...processing, ...bad });
+    assert.equal(parsed.status, "processing", JSON.stringify(bad));
+    assert.deepEqual(
+      { stage: parsed.stage, stage_detail: parsed.stage_detail, stage_started_at: parsed.stage_started_at, kind: parsed.kind },
+      noStage, JSON.stringify(bad),
+    );
+  }
+  assert.deepEqual(parseSessionState({ ...processing, stage_detail: { done: 100_000, total: 100_000 } }).stage_detail, { done: 100_000, total: 100_000 });
+});
+
+test("parseCreatedSession accepts a CSV session within the CSV cap", () => {
+  const csv = { ...created, required_headers: { "Content-Type": "text/csv", "x-goog-content-length-range": `1,${MAX_CSV_BYTES}` } };
+  assert.equal(parseCreatedSession(csv).required_headers["Content-Type"], "text/csv");
+  assert.throws(() => parseCreatedSession({ ...csv, required_headers: { ...csv.required_headers, "x-goog-content-length-range": `1,${MAX_CSV_BYTES + 1}` } }));
+  assert.throws(() => parseCreatedSession({ ...csv, required_headers: { ...csv.required_headers, "Content-Type": "text/csv; charset=utf-8" } }));
+});
+
+test("uploadKindOf and kindFromContentType", () => {
+  assert.equal(uploadKindOf({ name: "Plan.PDF", type: "" }), "pdf");
+  assert.equal(uploadKindOf({ name: "projects.csv", type: "application/vnd.ms-excel" }), "csv");
+  assert.equal(uploadKindOf({ name: "photo.png", type: "application/pdf" }), null);
+  assert.equal(uploadKindOf({ name: "noext", type: "text/csv" }), "csv");
+  assert.equal(uploadKindOf({}), null);
+  assert.equal(kindFromContentType("application/pdf"), "pdf");
+  assert.equal(kindFromContentType("image/png"), null);
+});
+
+test("splitCsvLine handles quotes", () => {
+  const line = ["project_id", "\"project_name\"", "\"a \"\"q\"\", b\"", "utility"].join(",");
+  assert.deepEqual(splitCsvLine(line), ["project_id", "project_name", "a \"q\", b", "utility"]);
+});
+
+test("validateCsv checks size, UTF-8 and the required header", async () => {
+  assert.deepEqual(await validateCsv(new Blob(["project_id,project_name,utility\r\nP1,A,U\n"])), { ok: true });
+  assert.deepEqual(await validateCsv(new Blob(["﻿utility,\"project_name\",project_id,state"])), { ok: true });
+  assert.equal((await validateCsv(new Blob([]))).ok, false);
+  assert.match((await validateCsv(new Blob(["project_id,utility\nP1,U"])) as { error: string }).error, /project_name/);
+  assert.match((await validateCsv(new Blob([new Uint8Array([0x70, 0xff, 0xfe, 0x0a])])) as { error: string }).error, /UTF-8/);
+  const big = { size: MAX_CSV_BYTES + 1, slice: () => new Blob(["project_id,project_name,utility\n"]) } as unknown as Blob;
+  assert.equal((await validateCsv(big)).ok, false);
+});
+
+const csvCreated = { ...created, required_headers: { "Content-Type": "text/csv", "x-goog-content-length-range": `1,${MAX_CSV_BYTES}` } };
+
+test("runUploadSession emits onProgress in order and fires onQueued once before polling", async () => {
+  const deps = fakeDeps([
+    { ...processing, stage: "extracting", stage_detail: { done: 1, total: 2 } },
+    { ...processing, stage: "extracting", stage_detail: { done: 1, total: 2 } },
+    { ...processing, stage: "saving" },
+    state,
+  ]);
+  const events: string[] = [];
+  const progress: UploadProgress[] = [];
+  const result = await runUploadSession(pdf(), {
+    onProgress: (p) => { progress.push(p); events.push(`progress:${p.phase}`); },
+    onQueued: (id) => events.push(`queued:${id}:${deps.calls.length}`),
+  }, deps);
+  assert.equal(result.upload_id, "UPL_abc123");
+  assert.deepEqual(progress, [
+    { kind: "pdf", phase: "checking" },
+    { kind: "pdf", phase: "preparing" },
+    { kind: "pdf", phase: "uploading", percent: 0 },
+    { kind: "pdf", phase: "uploading", percent: 100 },
+    { kind: "pdf", phase: "queued" },
+    { kind: "pdf", phase: "processing", stage: "extracting", detail: { done: 1, total: 2 } },
+    { kind: "pdf", phase: "processing", stage: "saving", detail: null },
+    { kind: "pdf", phase: "succeeded", uploadId: "UPL_abc123" },
+  ]);
+  // onQueued fires after POST create + POST process (2 calls) and before the first GET.
+  assert.deepEqual(events.filter((e) => e.startsWith("queued:")), [`queued:${ID}:2`]);
+  assert.ok(events.indexOf(`queued:${ID}:2`) < events.indexOf("progress:queued"));
+});
+
+test("runUploadSession sends content_type by kind and validates CSV", async () => {
+  const bodies: unknown[] = [];
+  const deps = fakeDeps([state]);
+  const inner = deps.callApi;
+  deps.callApi = async (path, init) => {
+    if (path === "/api/upload-sessions") { bodies.push(init?.body); return csvCreated; }
+    return inner(path, init);
+  };
+  const csv = new File(["project_id,project_name,utility\nP,A,U\n"], "projects.csv", { type: "text/csv" });
+  const progress: UploadProgress[] = [];
+  const labels: string[] = [];
+  await runUploadSession(csv, { onProgress: (p) => progress.push(p), onStatus: (l) => labels.push(l) }, deps);
+  assert.deepEqual(bodies, [{ size_bytes: csv.size, content_type: "text/csv" }]);
+  assert.equal(progress[0].kind, "csv");
+  assert.equal(labels[0], "Checking CSV...");
+  const bad = fakeDeps([]);
+  await assert.rejects(runUploadSession(new File(["a,b\n"], "x.csv"), {}, bad), /project_id/);
+  assert.deepEqual(bad.calls, []);
+});
+
+test("runUploadSession pdf create body includes application/pdf", async () => {
+  const deps = fakeDeps([state]);
+  let body: unknown;
+  const inner = deps.callApi;
+  deps.callApi = async (path, init) => { if (path === "/api/upload-sessions") body = init?.body; return inner(path, init); };
+  await runUploadSession(pdf(), {}, deps);
+  assert.deepEqual(body, { size_bytes: pdf().size, content_type: "application/pdf" });
+});
+
+test("runUploadSession rejects a session signed for the other kind", async () => {
+  const deps = fakeDeps([state]);
+  const inner = deps.callApi;
+  deps.callApi = async (path, init) => (path === "/api/upload-sessions" ? csvCreated : inner(path, init));
+  await assert.rejects(runUploadSession(pdf(), {}, deps), { message: "Invalid required_headers" });
+});
+
+test("runUploadSession emits failure progress with client and backend error codes", async () => {
+  const seen: UploadProgress[] = [];
+  await assert.rejects(runUploadSession(new Blob(["hello"]), { onProgress: (p) => seen.push(p) }, fakeDeps([])));
+  assert.deepEqual(seen.at(-1), { kind: "pdf", phase: "failed", stage: null, errorCode: "invalid_file" });
+
+  const putFails = fakeDeps([]);
+  putFails.put = (async () => { throw new Error("Upload to storage failed"); }) as typeof putToSignedUrl;
+  seen.length = 0;
+  await assert.rejects(runUploadSession(pdf(), { onProgress: (p) => seen.push(p) }, putFails));
+  assert.equal(seen.at(-1)?.errorCode, "upload_failed");
+
+  const notFound = new UploadApiError(404, "Upload session not found.");
+  seen.length = 0;
+  await assert.rejects(runUploadSession(pdf(), { onProgress: (p) => seen.push(p) },
+    fakeDeps([{ ...processing, stage: "parsing" }, notFound])));
+  assert.deepEqual(seen.at(-1), { kind: "pdf", phase: "failed", stage: "parsing", errorCode: "session_not_found" });
+
+  seen.length = 0;
+  const serverError = new UploadApiError(500, "x");
+  await assert.rejects(runUploadSession(pdf(), { onProgress: (p) => seen.push(p) },
+    fakeDeps([{ ...processing, stage: "parsing" }, serverError])));
+  assert.equal(seen.at(-1)?.errorCode, "poll_failed");
+
+  seen.length = 0;
+  const failed = await runUploadSession(pdf(), { onProgress: (p) => seen.push(p) },
+    fakeDeps([{ ...processing, status: "failed", stage: "extracting", error_code: "snowflake_failed" }]));
+  assert.equal(failed.status, "failed");
+  assert.deepEqual(seen.at(-1), { kind: "pdf", phase: "failed", stage: "extracting", errorCode: "snowflake_failed" });
+});
+
+test("a navigation abort after onQueued rejects quietly without failure progress", async () => {
+  const controller = new AbortController();
+  const deps = fakeDeps([{ ...processing }, state]);
+  const seen: UploadProgress[] = [];
+  let queued = 0;
+  const run = runUploadSession(pdf(), {
+    signal: controller.signal,
+    onProgress: (p) => seen.push(p),
+    onQueued: () => { queued += 1; controller.abort(); },
+  }, deps);
+  await assert.rejects(run, (e) => e instanceof UploadCancelledError && isUploadCancelled(e));
+  assert.equal(queued, 1);
+  assert.equal(seen.some((p) => p.phase === "failed"), false);
+  assert.equal(deps.calls.filter((c) => c.startsWith("GET")).length, 0);
+});
+
+test("an abort that surfaces as a fetch error is still reported as cancelled", async () => {
+  const controller = new AbortController();
+  const deps = fakeDeps([]);
+  const inner = deps.callApi;
+  deps.callApi = async (path, init) => {
+    if (path.endsWith("/process")) { controller.abort(); throw new UploadApiError(null, GENERIC_API_ERROR); }
+    return inner(path, init);
+  };
+  const seen: UploadProgress[] = [];
+  await assert.rejects(runUploadSession(pdf(), { signal: controller.signal, onProgress: (p) => seen.push(p) }, deps),
+    (e) => e instanceof UploadCancelledError);
+  assert.equal(seen.some((p) => p.phase === "failed"), false);
+});
+
+test("pollUploadSession resumes an existing session and polls immediately", async () => {
+  const deps = fakeDeps([{ ...processing, stage: "matching", kind: "csv" }, state]);
+  let sleeps = 0;
+  deps.sleep = async () => { sleeps += 1; };
+  const seen: UploadProgress[] = [];
+  const result = await pollUploadSession(ID, { onProgress: (p) => seen.push(p) }, deps);
+  assert.equal(result.upload_id, "UPL_abc123");
+  assert.equal(sleeps, 1);
+  assert.deepEqual(seen, [
+    { kind: "csv", phase: "processing", stage: "matching", detail: null },
+    { kind: "csv", phase: "succeeded", uploadId: "UPL_abc123" },
+  ]);
+  await assert.rejects(pollUploadSession("SES_bad", {}, deps), { message: "Invalid session_id" });
+});
+
+test("sessionProgress maps statuses", () => {
+  const parsed = parseSessionState({ ...processing, status: "failed", error_code: "timeout", stage: "locating" });
+  assert.deepEqual(sessionProgress("failed", parsed, "pdf"), { kind: "pdf", phase: "failed", stage: "locating", errorCode: "timeout" });
+  assert.deepEqual(sessionProgress("created", null), { phase: "queued" });
+});
+
+test("isSessionNotFoundError matches only 401/403/404 upload API errors", () => {
+  for (const status of [401, 403, 404]) assert.equal(isSessionNotFoundError(new UploadApiError(status, "x")), true, String(status));
+  for (const reason of [new UploadApiError(null, "x"), new UploadApiError(422, "x"), new UploadApiError(503, "x"), new Error("404")]) {
+    assert.equal(isSessionNotFoundError(reason), false, String(reason));
+  }
+});
+
+test("pollUploadSession reports expired or foreign sessions as session_not_found", async () => {
+  for (const status of [401, 403, 404]) {
+    const seen: UploadProgress[] = [];
+    const reason = new UploadApiError(status, "Upload session not found.");
+    await assert.rejects(pollUploadSession(ID, { onProgress: (p) => seen.push(p) }, fakeDeps([reason])), (e) => e === reason);
+    assert.deepEqual(seen, [{ kind: "pdf", phase: "failed", stage: null, errorCode: "session_not_found" }], String(status));
+  }
+});
+
+test("pollUploadSession keeps poll_failed for exhausted transient failures", async () => {
+  const flaky = new UploadApiError(503, "x");
+  const seen: UploadProgress[] = [];
+  await assert.rejects(pollUploadSession(ID, { onProgress: (p) => seen.push(p) }, fakeDeps([flaky, flaky, flaky])),
+    { message: POLL_GAVE_UP_MESSAGE });
+  assert.equal(seen.at(-1)?.errorCode, "poll_failed");
 });

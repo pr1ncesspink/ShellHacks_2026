@@ -165,11 +165,8 @@ export function VerifyEmailPanel({
   return (
     <Card className="login-card panel">
       <div className="login-card-top">
-        <span className="icon-tile blue">
-          <MailCheck size={24} aria-hidden="true" />
-        </span>
         <Badge variant="outline" className="muted-badge">
-          EMAIL VERIFICATION
+          Email verification
         </Badge>
       </div>
       <h2>Check your inbox.</h2>
@@ -189,7 +186,7 @@ export function VerifyEmailPanel({
               : "."}
           </p>
         </div>
-        <MailCheck size={17} aria-hidden="true" />
+        <MailCheck size={16} aria-hidden="true" />
       </div>
       <div className="auth-step second-step">
         <span className="step-number">02</span>
@@ -197,7 +194,7 @@ export function VerifyEmailPanel({
           <h3>Return here</h3>
           <p>Then ask GridLens to check your verified status.</p>
         </div>
-        <ShieldCheck size={17} aria-hidden="true" />
+        <ShieldCheck size={16} aria-hidden="true" />
       </div>
       {error ? (
         <p className="auth-feedback error" role="alert">
@@ -225,7 +222,7 @@ export function VerifyEmailPanel({
           onClick={handleResend}
           disabled={Boolean(busy) || cooldown > 0}
         >
-          <RefreshCw size={15} aria-hidden="true" />
+          <RefreshCw size={16} aria-hidden="true" />
           {busy === "resend"
             ? "Sending…"
             : cooldown > 0

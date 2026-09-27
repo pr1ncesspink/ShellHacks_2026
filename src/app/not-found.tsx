@@ -1,11 +1,16 @@
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
+
 export default function NotFound() {
   return (
     <main id="main-content" className="error-page">
-      <span className="eyebrow">404 / OUTSIDE THE GRID</span>
-      <h1>This page isn’t in the plan.</h1>
+      <p className="eyebrow">Page not found</p>
+      <h1>We couldn’t find that page.</h1>
+      <p className="text-muted-foreground">
+        The link may be out of date, or the page may have moved.
+      </p>
       <Link href="/dashboard" className="subtle-link">
-        Return to the dashboard →
+        Go to the dashboard <ArrowRight size={16} aria-hidden="true" />
       </Link>
     </main>
   );

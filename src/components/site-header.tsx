@@ -1,6 +1,12 @@
 import Link from "next/link";
-import Image from "next/image";
-import { LayoutDashboard, LogOut } from "lucide-react";
+import {
+  CalendarRange,
+  FileText,
+  LayoutDashboard,
+  LogOut,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { Brand } from "@/components/brand";
 
@@ -9,11 +15,19 @@ export type SiteUser = {
   name: string | null;
 };
 
+export type SiteSection = "dashboard" | "summary" | "budget" | "profile";
+
+const NAV_ITEMS: { id: Exclude<SiteSection, "profile">; href: string; label: string; icon: LucideIcon }[] = [
+  { id: "dashboard", href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "summary", href: "/summary", label: "Summary", icon: FileText },
+  { id: "budget", href: "/budget", label: "Budget", icon: CalendarRange },
+];
+
 export function SiteHeader({
   active,
   user,
 }: {
-  active: "dashboard" | "budget" | "profile";
+  active: SiteSection;
   user: SiteUser;
 }) {
   const displayName = user.name?.trim() || user.email || "GridLens member";
@@ -23,13 +37,16 @@ export function SiteHeader({
       <div className="header-inner">
         <Brand />
         <nav aria-label="Main navigation" className="main-nav">
-          <Link
-            href="/dashboard"
-            aria-current={active === "dashboard" ? "page" : undefined}
-          >
-            <LayoutDashboard size={16} aria-hidden="true" />
-            Dashboard
-          </Link>
+          {NAV_ITEMS.map(({ id, href, label, icon: Icon }) => (
+            <Link
+              key={id}
+              href={href}
+              aria-current={active === id ? "page" : undefined}
+            >
+              <Icon size={16} aria-hidden="true" />
+              {label}
+            </Link>
+          ))}
         </nav>
         <div className="profile-area">
           <span className="profile-copy">
@@ -43,13 +60,12 @@ export function SiteHeader({
             aria-current={active === "profile" ? "page" : undefined}
             title="Account and profile"
           >
-            <Image
-              src="/profile.svg"
-              alt=""
-              width={38}
-              height={38}
-              className="avatar"
-            />
+            <span
+              className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground"
+              aria-hidden="true"
+            >
+              <UserRound size={20} aria-hidden="true" />
+            </span>
           </Link>
           <SignOutButton
             variant="ghost"
@@ -58,7 +74,7 @@ export function SiteHeader({
             aria-label="Sign out"
             title="Sign out"
           >
-            <LogOut size={17} aria-hidden="true" />
+            <LogOut size={20} aria-hidden="true" />
             <span className="sr-only">Sign out</span>
           </SignOutButton>
         </div>

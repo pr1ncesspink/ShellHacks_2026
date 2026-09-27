@@ -1,19 +1,10 @@
-import Image from "next/image";
-import Link from "next/link";
-import {
-  ArrowRight,
-  UserRound,
-  ShieldCheck,
-  Fingerprint,
-} from "lucide-react";
+import { Fingerprint, UserRound } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
-import { WorkspaceFooter } from "@/components/workspace";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { requireUser } from "@/lib/server/session";
 
-export const metadata = { title: "Account & Profile" };
+export const metadata = { title: "Account and profile" };
 export default async function ProfilePage() {
   const user = await requireUser("/profile");
   const displayName = user.name?.trim() || "GridLens member";
@@ -24,60 +15,47 @@ export default async function ProfilePage() {
       <main id="main-content" className="workspace">
         <div className="page-heading">
           <div>
-            <div className="breadcrumb">
-              WORKSPACE <span>/</span> ACCOUNT & PROFILE
-            </div>
-            <h1>Your perspective starts here.</h1>
-            <p>
-              A home for your identity, your team, and your account preferences.
+            <p className="breadcrumb">
+              Workspace <span aria-hidden="true">/</span> Account and profile
             </p>
+            <h1>Your account</h1>
+            <p>Your identity, your team, and your account preferences.</p>
           </div>
           <Badge variant="outline" className="muted-badge">
-            PROFILE PREVIEW
+            Profile preview
           </Badge>
         </div>
         <div className="profile-grid">
           <div className="profile-summary-stack">
-          <Card className="profile-summary panel">
-            <div className="profile-cover" aria-hidden="true" />
-            <div className="profile-summary-content">
-              <Image
-                src="/profile.svg"
-                alt=""
-                width={88}
-                height={88}
-                className="profile-portrait"
-              />
-              <span className="eyebrow">YOUR GRIDLENS ACCOUNT</span>
-              <h2>{displayName}</h2>
-              <p>{email}</p>
-              <Badge variant="outline" className="muted-badge">
-                VERIFIED ACCOUNT
-              </Badge>
-              <div className="profile-team">
-                <span>
-                  Organization preview
-                  <small>Team details are not connected yet</small>
+            <Card className="profile-summary panel">
+              <div className="profile-cover" aria-hidden="true" />
+              <div className="profile-summary-content">
+                <span
+                  className="profile-portrait flex size-[88px] items-center justify-center bg-muted text-muted-foreground"
+                  aria-hidden="true"
+                >
+                  <UserRound size={20} aria-hidden="true" />
                 </span>
+                <span className="eyebrow">Your GridLens account</span>
+                <h2>{displayName}</h2>
+                <p>{email}</p>
+                <Badge variant="success">Verified account</Badge>
+                <div className="profile-team">
+                  <span>
+                    Organization preview
+                    <small>Team details are not connected yet</small>
+                  </span>
+                </div>
               </div>
-              <Button asChild className="profile-dashboard-button">
-                <Link href="/dashboard">
-                  Go to dashboard <ArrowRight size={16} aria-hidden="true" />
-                </Link>
-              </Button>
-            </div>
-          </Card>
+            </Card>
           </div>
           <section className="profile-details" aria-label="Account information">
             <Card className="profile-info panel">
               <div className="panel-heading">
                 <div>
-                  <span className="eyebrow">01 / ABOUT YOU</span>
+                  <span className="eyebrow">About you</span>
                   <h2>Profile information</h2>
                 </div>
-                <span className="icon-tile blue">
-                  <UserRound size={19} aria-hidden="true" />
-                </span>
               </div>
               <dl className="profile-fields">
                 <div>
@@ -99,50 +77,41 @@ export default async function ProfilePage() {
               </dl>
               <p className="profile-note">
                 Name and email come from your verified Firebase account. The
-                organization and role remain previews.
+                organization and role are still previews.
               </p>
             </Card>
             <Card className="profile-info panel">
               <div className="panel-heading">
                 <div>
-                  <span className="eyebrow">02 / ACCOUNT ACCESS</span>
-                  <h2>Sign-in & verification</h2>
+                  <span className="eyebrow">Account access</span>
+                  <h2>Sign-in and verification</h2>
                 </div>
-                <span className="icon-tile violet">
-                  <ShieldCheck size={19} aria-hidden="true" />
-                </span>
               </div>
               <div className="security-row">
                 <UserRound size={20} aria-hidden="true" />
                 <div>
-                  <h3>Email & password</h3>
+                  <h3>Email and password</h3>
                   <p>{email} is verified for workspace access.</p>
                 </div>
-                <Badge variant="outline" className="muted-badge">
-                  VERIFIED
-                </Badge>
+                <Badge variant="success">Verified</Badge>
               </div>
               <div className="security-row">
-                <Fingerprint size={21} aria-hidden="true" />
+                <Fingerprint size={20} aria-hidden="true" />
                 <div>
                   <h3>Additional sign-in factors</h3>
-                  <p>Multi-factor authentication is a future preview.</p>
+                  <p>Multi-factor authentication is coming later.</p>
                 </div>
                 <Badge variant="outline" className="muted-badge">
-                  PREVIEW
+                  Preview
                 </Badge>
               </div>
-              <Link href="/dashboard" className="subtle-link">
-                Return to dashboard <ArrowRight size={14} aria-hidden="true" />
-              </Link>
             </Card>
           </section>
         </div>
         <p className="budget-disclaimer">
-          Organization, role, profile editing, and multi-factor settings remain
+          Organization, role, profile editing, and multi-factor settings are
           previews. Your Firebase name and verified email are live.
         </p>
-        <WorkspaceFooter />
       </main>
     </>
   );

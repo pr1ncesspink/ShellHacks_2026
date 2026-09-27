@@ -1,4 +1,4 @@
-// Server-side proxy helper for /api/upload-sessions/*. Deliberately free of
+// Server-side proxy helper for /api/upload-sessions/* and /api/uploads/*. Deliberately free of
 // next/server and server-only imports so node tests can exercise it directly.
 import { buildBackendHeaders, type BackendConfig } from "./backend-config.ts";
 import { SESSION_ID } from "./upload-sessions.ts";
@@ -19,15 +19,33 @@ export type ProxyOptions = {
   fetchImpl?: typeof fetch;
   parse: (value: unknown) => unknown;
   onAuthReject?: () => void;
+  /** Per-route copy for passed-through statuses; defaults to the upload-session wording. */
+  messages?: PassThroughMessages;
 };
 
-const PASS_THROUGH: Record<number, string> = {
+export type PassThroughStatus = 404 | 409 | 422 | 503;
+export type PassThroughMessages = Partial<Record<PassThroughStatus, string>>;
+
+const PASS_THROUGH: Record<PassThroughStatus, string> = {
   404: "Upload session not found.",
   409: "The PDF has not finished uploading.",
   422: "The upload request or PDF was rejected.",
   503: "Upload processing is not configured.",
 };
 const UNAVAILABLE = "Upload backend unavailable. Try again shortly.";
+
+/** Copy for the owner-scoped /api/uploads routes (summary, map, recent list). */
+export const UPLOAD_ROUTE_MESSAGES: PassThroughMessages = {
+  404: "Upload not found.",
+  422: "Invalid upload id.",
+  503: "Upload summaries are not available right now.",
+};
+
+function passThroughMessage(status: number, messages: PassThroughMessages | undefined): string | undefined {
+  if (!Object.hasOwn(PASS_THROUGH, status)) return undefined;
+  const key = status as PassThroughStatus;
+  return messages?.[key] ?? PASS_THROUGH[key];
+}
 
 /** Backend path for a session, or null when the id is not a valid session id. */
 export function sessionPath(id: string, action?: "process"): string | null {
@@ -36,7 +54,7 @@ export function sessionPath(id: string, action?: "process"): string | null {
 }
 
 export async function proxyBackend(options: ProxyOptions): Promise<ProxyResult> {
-  const { config, uid, token, path, init = { method: "GET" }, timeoutMs = 30_000, parse, onAuthReject } = options;
+  const { config, uid, token, path, init = { method: "GET" }, timeoutMs = 30_000, parse, onAuthReject, messages } = options;
   const fetchImpl = options.fetchImpl ?? fetch;
   if (path.startsWith("/") || path.includes("..") || path.includes("//") || /[?#\\]/.test(path)) {
     throw new Error("Invalid backend path");
@@ -60,7 +78,7 @@ export async function proxyBackend(options: ProxyOptions): Promise<ProxyResult> 
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) onAuthReject?.();
-    const message = PASS_THROUGH[response.status];
+    const message = passThroughMessage(response.status, messages);
     return message
       ? { status: response.status, body: { error: message } }
       : { status: 502, body: { error: UNAVAILABLE } };

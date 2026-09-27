@@ -22,7 +22,7 @@ export default async function RootLayout({
         </a>
         {!preview && <SessionSync />}
         {preview && (
-          <div className="bg-[#101d30] px-4 py-2 text-center text-xs text-[#8a9597]">
+          <div className="border-b border-border bg-background px-4 py-2 text-center text-xs text-muted-foreground">
             Local design preview · Production sign-in remains enabled
           </div>
         )}
