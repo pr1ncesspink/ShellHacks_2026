@@ -1,6 +1,7 @@
 """FastAPI application entrypoint."""
 
 from fastapi import FastAPI
+from backend.app.api.routes.map_analysis import router as map_analysis_router
 
 from backend.app.api.rate_limit import AgentRateLimitMiddleware
 from backend.app.api.routes.health import router as health_router
@@ -19,6 +20,7 @@ def create_app() -> FastAPI:
     app.include_router(overlaps_router)
     app.include_router(collisions_router)
     app.include_router(projects_router)
+    app.include_router(map_analysis_router)
     settings = get_settings()
     if settings.agent_rate_limit_per_client or settings.agent_rate_limit_total:
         app.add_middleware(

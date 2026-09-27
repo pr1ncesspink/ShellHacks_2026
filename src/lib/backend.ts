@@ -1,4 +1,5 @@
 import "server-only";
+import { isLocalPreview } from "./server/local-preview";
 import { buildBackendHeaders, readBackendConfig } from "./backend-config";
 import { exampleOverlaps, parseOverlaps, type Overlap } from "./overlaps";
 import {
@@ -11,7 +12,13 @@ type DashboardData = { mode: "example" | "live" | "error"; rows: Overlap[] };
 export async function getDashboardData(
   user: Pick<SessionUser, "uid">,
 ): Promise<DashboardData> {
+  const preview = await isLocalPreview();
   const config = readBackendConfig(process.env);
+  // A preview identity may only read an unauthenticated local development API.
+  if (preview && config.mode === "live" &&
+      (config.auth !== "none" || !["127.0.0.1", "localhost", "[::1]"].includes(new URL(config.url).hostname))) {
+    return { mode: "error", rows: [] };
+  }
   if (config.mode === "example") {
     return { mode: "example", rows: exampleOverlaps };
   }
@@ -31,7 +38,7 @@ export async function getDashboardData(
       {
         cache: "no-store",
         signal: AbortSignal.timeout(15000),
-        headers: buildBackendHeaders(user.uid, googleIdToken),
+        headers: preview ? { Accept: "application/json" } : buildBackendHeaders(user.uid, googleIdToken),
       },
     );
     if (
