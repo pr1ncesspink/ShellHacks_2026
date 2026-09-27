@@ -1,9 +1,17 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { distanceMiles, nearbyRecordIds } from "./project-proximity.ts";
+import { distanceMiles, nearbyRecordIds, nearbyConnections } from "./project-proximity.ts";
 
 const point = (id: string, latitude: number, longitude = 0, project = id) =>
   ({ record_id: id, project_id: project, latitude, longitude });
+
+test("connections are symmetric and exclude unrelated or same-project records", () => {
+  const links = nearbyConnections([point("a", 0), point("upload", 0.1), point("segment", 0, 0, "a"), point("far", 10)]);
+  assert.deepEqual([...links.get("a")!], ["upload"]);
+  assert.deepEqual([...links.get("upload")!].sort(), ["a", "segment"]);
+  assert.equal(links.has("far"), false);
+  assert.equal(links.get("a")!.has("a"), false);
+});
 
 test("inclusive 25-mile boundary flags both distinct projects, excluding outside points", () => {
   const degrees = 25 / 3958.7613 * 180 / Math.PI;

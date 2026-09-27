@@ -212,3 +212,116 @@ export function putToSignedUrl(
     xhr.send(file);
   });
 }
+
+export const SESSION_STATUS_LABELS: Record<SessionStatus, string> = {
+  created: "Waiting for upload...",
+  queued: "Queued for Snowflake processing...",
+  processing: "Processing in Snowflake. Large plans can take a while...",
+  succeeded: "Processing finished.",
+  failed: "Processing failed.",
+};
+
+/** JSON call to /api/upload-sessions/*; failures become UploadApiError with a safe message. */
+export async function callUploadApi(path: string, init?: { method: "POST"; body?: unknown }, fetchImpl?: typeof fetch): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await (fetchImpl ?? fetch)(path, {
+      method: init?.method ?? "GET",
+      cache: "no-store",
+      headers: init?.body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+  } catch {
+    throw new UploadApiError(null, GENERIC_API_ERROR);
+  }
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    throw new UploadApiError(response.status, apiErrorMessage(response.status, body));
+  }
+  try {
+    return await response.json();
+  } catch {
+    // Never surface a JSON parser message: it can quote the response body.
+    throw new UploadApiError(response.status, GENERIC_API_ERROR);
+  }
+}
+
+export type UploadSessionDeps = {
+  callApi?: (path: string, init?: { method: "POST"; body?: unknown }) => Promise<unknown>;
+  put?: typeof putToSignedUrl;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  pollMs?: number;      // default 5_000
+  pollLimitMs?: number; // default 70 * 60 * 1000
+};
+export type UploadSessionResult = SessionState & { status: "succeeded" | "failed" };
+
+const terminal = (s: SessionStatus): s is "succeeded" | "failed" => s === "succeeded" || s === "failed";
+
+/**
+ * Validate, create a session, PUT to the signed URL, start processing and poll
+ * until a terminal state. Parser errors ("Invalid ...") propagate as-is.
+ */
+export async function runUploadSession(
+  file: Blob,
+  options: { onStatus?: (label: string) => void; signal?: AbortSignal },
+  deps: UploadSessionDeps = {},
+): Promise<UploadSessionResult> {
+  const { onStatus, signal } = options;
+  const callApi = deps.callApi ?? ((path, init) => callUploadApi(path, init));
+  const put = deps.put ?? putToSignedUrl;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  const now = deps.now ?? Date.now;
+  const pollMs = deps.pollMs ?? 5_000;
+  const pollLimitMs = deps.pollLimitMs ?? 70 * 60 * 1000;
+  const guard = () => { if (signal?.aborted) throw new Error("Upload cancelled"); };
+
+  guard();
+  onStatus?.("Checking PDF...");
+  const check = await validatePdf(file);
+  if (!check.ok) throw new Error(check.error);
+  guard();
+  onStatus?.("Preparing upload...");
+  const session = parseCreatedSession(await callApi("/api/upload-sessions", { method: "POST", body: { size_bytes: file.size } }));
+  guard();
+  onStatus?.("Uploading 0%");
+  await put(session, file, percent => onStatus?.(`Uploading ${percent}%`), signal);
+  guard();
+  const statusPath = `/api/upload-sessions/${session.session_id}`;
+  let current = parseProcessResult(await callApi(`${statusPath}/process`, { method: "POST" })).status;
+  guard();
+  let latest: SessionState | null = null;
+  const deadline = now() + pollLimitMs;
+  let failures = 0;
+  for (;;) {
+    onStatus?.(SESSION_STATUS_LABELS[current]);
+    if (terminal(current)) {
+      // The process call only reports a status; fetch the full state once.
+      if (!latest) {
+        latest = parseSessionState(await callApi(statusPath));
+        guard();
+        current = latest.status;
+        if (!terminal(current)) continue;
+      }
+      return { ...latest, status: current };
+    }
+    if (now() >= deadline) throw new Error("Processing is taking longer than expected. Check again later.");
+    await sleep(pollMs);
+    guard();
+    let polled: unknown;
+    try {
+      polled = await callApi(statusPath);
+    } catch (reason) {
+      guard();
+      const next = pollFailureAction(failures, reason);
+      if (next.action === "fatal") throw reason;
+      if (next.action === "give-up") throw new Error(POLL_GAVE_UP_MESSAGE);
+      failures = next.consecutive;
+      continue;
+    }
+    guard();
+    failures = 0;
+    latest = parseSessionState(polled);
+    current = latest.status;
+  }
+}

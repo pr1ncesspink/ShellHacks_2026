@@ -6,41 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { readProjectPdf } from "@/lib/pdf-reader";
 import { toMapProject, validateDraft, type MapProject, type ProjectDraft } from "@/lib/project-data";
-import { GENERIC_API_ERROR, POLL_GAVE_UP_MESSAGE, UploadApiError, apiErrorMessage, parseCreatedSession, parseProcessResult, parseSessionState, pollFailureAction, putToSignedUrl, validatePdf, type SessionStatus } from "@/lib/upload-sessions";
-
-const POLL_MS = 5_000;
-const POLL_LIMIT_MS = 70 * 60 * 1000;
-const REMOTE_LABELS: Record<SessionStatus, string> = {
-  created: "Waiting for upload...",
-  queued: "Queued for Snowflake processing...",
-  processing: "Processing in Snowflake. Large plans can take a while...",
-  succeeded: "Processing finished.",
-  failed: "Processing failed.",
-};
-
-async function callApi(path: string, init?: { method: "POST"; body?: unknown }): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await fetch(path, {
-      method: init?.method ?? "GET",
-      cache: "no-store",
-      headers: init?.body === undefined ? undefined : { "Content-Type": "application/json" },
-      body: init?.body === undefined ? undefined : JSON.stringify(init.body),
-    });
-  } catch {
-    throw new UploadApiError(null, GENERIC_API_ERROR);
-  }
-  if (!response.ok) {
-    const body: unknown = await response.json().catch(() => null);
-    throw new UploadApiError(response.status, apiErrorMessage(response.status, body));
-  }
-  try {
-    return await response.json();
-  } catch {
-    // Never surface a JSON parser message: it can quote the response body.
-    throw new UploadApiError(response.status, GENERIC_API_ERROR);
-  }
-}
+import { runUploadSession, validatePdf } from "@/lib/upload-sessions";
 
 export function PdfProjectUpload({ onApply }: { onApply: (rows: MapProject[], source: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
@@ -101,42 +67,10 @@ export function PdfProjectUpload({ onApply }: { onApply: (rows: MapProject[], so
     const live = () => run === remoteGeneration.current;
     setRemoteBusy(true); setRemoteError(""); setUploadId(""); setRemoteStatus("Checking PDF...");
     try {
-      const check = await validatePdf(file);
-      if (!check.ok) throw new Error(check.error);
+      const state = await runUploadSession(file, { onStatus: label => { if (live()) setRemoteStatus(label); }, signal: controller.signal });
       if (!live()) return;
-      setRemoteStatus("Preparing upload...");
-      const session = parseCreatedSession(await callApi("/api/upload-sessions", { method: "POST", body: { size_bytes: file.size } }));
-      if (!live()) return;
-      setRemoteStatus("Uploading 0%");
-      await putToSignedUrl(session, file, percent => { if (live()) setRemoteStatus(`Uploading ${percent}%`); }, controller.signal);
-      if (!live()) return;
-      const statusPath = `/api/upload-sessions/${session.session_id}`;
-      let current = parseProcessResult(await callApi(`${statusPath}/process`, { method: "POST" })).status;
-      const deadline = Date.now() + POLL_LIMIT_MS;
-      let failures = 0;
-      while (live()) {
-        setRemoteStatus(REMOTE_LABELS[current]);
-        if (current === "succeeded" || current === "failed") return;
-        if (Date.now() >= deadline) throw new Error("Processing is taking longer than expected. Check again later.");
-        await new Promise(resolve => setTimeout(resolve, POLL_MS));
-        if (!live()) return;
-        let polled: unknown;
-        try {
-          polled = await callApi(statusPath);
-        } catch (reason) {
-          const next = pollFailureAction(failures, reason);
-          if (next.action === "fatal") throw reason;
-          if (next.action === "give-up") throw new Error(POLL_GAVE_UP_MESSAGE);
-          failures = next.consecutive;
-          continue;
-        }
-        failures = 0;
-        const state = parseSessionState(polled);
-        if (!live()) return;
-        current = state.status;
-        if (state.status === "succeeded" && state.upload_id) setUploadId(state.upload_id);
-        if (state.status === "failed") setRemoteError(`Processing failed${state.error_code ? ` (${state.error_code})` : ""}. The map has not changed.`);
-      }
+      if (state.status === "succeeded" && state.upload_id) setUploadId(state.upload_id);
+      if (state.status === "failed") setRemoteError(`Processing failed${state.error_code ? ` (${state.error_code})` : ""}. The map has not changed.`);
     } catch (reason) {
       if (live()) {
         setRemoteStatus("");

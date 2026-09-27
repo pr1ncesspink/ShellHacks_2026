@@ -10,13 +10,20 @@ export function distanceMiles(a: Point, b: Point): number {
 }
 
 export function nearbyRecordIds(points: Point[], radius = 25): Set<string> {
-  const nearby = new Set<string>();
+  return new Set(nearbyConnections(points, radius).keys());
+}
+
+export function nearbyConnections(points: Point[], radius = 25): Map<string, Set<string>> {
+  const nearby = new Map<string, Set<string>>();
   for (let i = 0; i < points.length; i++) {
     for (let j = i + 1; j < points.length; j++) {
       if (points[i].project_id === points[j].project_id) continue;
       if (distanceMiles(points[i], points[j]) <= radius + 1e-8) {
-        nearby.add(points[i].record_id);
-        nearby.add(points[j].record_id);
+        const a = points[i].record_id, b = points[j].record_id;
+        if (!nearby.has(a)) nearby.set(a, new Set());
+        if (!nearby.has(b)) nearby.set(b, new Set());
+        nearby.get(a)!.add(b);
+        nearby.get(b)!.add(a);
       }
     }
   }
